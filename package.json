@@ -1,0 +1,15 @@
+{
+  "name": "research-assist-ui-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:dom": "node tests/dom.spec.mjs",
+    "test:ui": "node tests/ui.spec.mjs",
+    "format:web": "prettier --write src/research_assist/web/*.{html,css,js}"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0",
+    "playwright": "1.62.1",
+    "prettier": "^3.6.2"
+  }
+}

@@ -1,0 +1,17 @@
+.git
+.venv
+.env
+data
+__pycache__
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+test-results
+evaluation-results
+dist
+node_modules
+models
+evaluation

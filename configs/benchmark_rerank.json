@@ -1,0 +1,5 @@
+[
+  {"name":"E5 base hybrid", "mode":"hybrid", "model":"models/multilingual-e5-small"},
+  {"name":"E5 + small multilingual reranker", "mode":"hybrid", "model":"models/multilingual-e5-small", "reranker":"cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"},
+  {"name":"E5 + BGE reranker", "mode":"hybrid", "model":"models/multilingual-e5-small", "reranker":"BAAI/bge-reranker-v2-m3"}
+]

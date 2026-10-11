@@ -1,0 +1,6 @@
+[
+  {"name":"BM25", "mode":"bm25"},
+  {"name":"E5 base dense", "mode":"dense", "model":"models/multilingual-e5-small"},
+  {"name":"E5 base hybrid", "mode":"hybrid", "model":"models/multilingual-e5-small"},
+  {"name":"E5 fine-tuned hybrid", "mode":"hybrid", "model":"models/multilingual-e5-research-v1"}
+]
