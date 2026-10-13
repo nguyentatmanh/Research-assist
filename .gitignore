@@ -20,6 +20,8 @@ evaluation-results/
 node_modules/
 models/
 evaluation/
+notebooks/
+*.ipynb
 
 # Documentation
 SOURCE.md
