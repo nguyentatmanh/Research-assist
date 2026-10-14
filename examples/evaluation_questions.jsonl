@@ -1,0 +1,1 @@
+{"id":"replace-with-reviewed-case-id","question":"Câu hỏi do nhóm đọc paper và kiểm duyệt","language":"vi","document_ids":["replace-with-real-doc-id"],"gold_evidence_ids":[],"unanswerable":false,"reviewed":false,"note":"Template only; not labeled benchmark data. Fill gold before scoring."}
