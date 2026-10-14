@@ -1,0 +1,144 @@
+{
+  "train-0": {
+    "title": "Study 0",
+    "abstract": "train paper 0 about language research.",
+    "full_text": [
+      {
+        "section_name": "Methods",
+        "paragraphs": [
+          "The train study 0 uses retrieval evidence for language models and evaluates scientific question answering.",
+          "Other train research 0 uses text classification datasets and reports limitations."
+        ]
+      }
+    ],
+    "qas": [
+      {
+        "question_id": "train-0-q",
+        "question": "What does train study 0 use to answer scientific questions?",
+        "answers": [
+          {
+            "answer": {
+              "unanswerable": false,
+              "evidence": [
+                "The train study 0 uses retrieval evidence for language models and evaluates scientific question answering."
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "train-1": {
+    "title": "Study 1",
+    "abstract": "train paper 1 about language research.",
+    "full_text": [
+      {
+        "section_name": "Methods",
+        "paragraphs": [
+          "The train study 1 uses retrieval evidence for language models and evaluates scientific question answering.",
+          "Other train research 1 uses text classification datasets and reports limitations."
+        ]
+      }
+    ],
+    "qas": [
+      {
+        "question_id": "train-1-q",
+        "question": "What does train study 1 use to answer scientific questions?",
+        "answers": [
+          {
+            "answer": {
+              "unanswerable": false,
+              "evidence": [
+                "The train study 1 uses retrieval evidence for language models and evaluates scientific question answering."
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "train-2": {
+    "title": "Study 2",
+    "abstract": "train paper 2 about language research.",
+    "full_text": [
+      {
+        "section_name": "Methods",
+        "paragraphs": [
+          "The train study 2 uses retrieval evidence for language models and evaluates scientific question answering.",
+          "Other train research 2 uses text classification datasets and reports limitations."
+        ]
+      }
+    ],
+    "qas": [
+      {
+        "question_id": "train-2-q",
+        "question": "What does train study 2 use to answer scientific questions?",
+        "answers": [
+          {
+            "answer": {
+              "unanswerable": false,
+              "evidence": [
+                "The train study 2 uses retrieval evidence for language models and evaluates scientific question answering."
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "train-3": {
+    "title": "Study 3",
+    "abstract": "train paper 3 about language research.",
+    "full_text": [
+      {
+        "section_name": "Methods",
+        "paragraphs": [
+          "The train study 3 uses retrieval evidence for language models and evaluates scientific question answering.",
+          "Other train research 3 uses text classification datasets and reports limitations."
+        ]
+      }
+    ],
+    "qas": [
+      {
+        "question_id": "train-3-q",
+        "question": "What does train study 3 use to answer scientific questions?",
+        "answers": [
+          {
+            "answer": {
+              "unanswerable": false,
+              "evidence": [
+                "The train study 3 uses retrieval evidence for language models and evaluates scientific question answering."
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "question_id": "train-3-unanswerable",
+        "question": "Which GPU did the researchers use?",
+        "answers": [
+          {
+            "answer": {
+              "unanswerable": true,
+              "evidence": []
+            }
+          }
+        ]
+      },
+      {
+        "question_id": "train-3-float",
+        "question": "What is shown in the figure?",
+        "answers": [
+          {
+            "answer": {
+              "unanswerable": false,
+              "evidence": [
+                "FLOAT SELECTED: Figure 1"
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
