@@ -13,6 +13,7 @@ def main() -> None:
 
     from datasets import load_dataset
     from huggingface_hub import HfApi, hf_hub_download
+
     # The original repo contains a legacy loading script, unsupported by datasets >= 4.
     # Use the official Hub parquet conversion, pinned to its commit, without remote code.
     revision = (

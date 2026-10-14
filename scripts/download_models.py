@@ -56,9 +56,7 @@ def main() -> None:
         raise RuntimeError("Không xác định được commit của model.")
 
     files = api.list_repo_files(args.model, revision=revision)
-    has_safetensors = any(
-        filename.endswith(".safetensors") for filename in files
-    )
+    has_safetensors = any(filename.endswith(".safetensors") for filename in files)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
