@@ -6,7 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Contract(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, allow_inf_nan=False)
+    model_config = ConfigDict(
+        extra="forbid", strict=True, str_strip_whitespace=True, allow_inf_nan=False
+    )
 
 
 class Document(Contract):
@@ -18,12 +20,15 @@ class Document(Contract):
     page_count: int = Field(ge=0)
     chunk_count: int = Field(ge=0)
     created_at: str
+    warnings: list[str] = Field(default_factory=list)
 
 
 class SourceSection(Contract):
     text: str
     page: int | None = None
     label: str = "Văn bản"
+    extraction: Literal["text", "ocr"] = "text"
+    warnings: list[str] = Field(default_factory=list)
 
 
 class Chunk(Contract):
@@ -61,6 +66,14 @@ class ResearchRequest(Contract):
     max_rounds: int = Field(default=2, ge=1, le=2)
     profile: Literal["balanced", "academic"] | None = None
     use_cache: bool = True
+    requirements: list[str] = Field(default_factory=list, max_length=6)
+
+    @field_validator("requirements")
+    @classmethod
+    def requirement_texts(cls, values: list[str]) -> list[str]:
+        if any(not v.strip() or len(v) > 500 for v in values):
+            raise ValueError("Each requirement must have 1–500 characters")
+        return list(dict.fromkeys(v.strip() for v in values))
 
     @field_validator("document_ids")
     @classmethod
@@ -126,8 +139,28 @@ class ClaimCheck(Contract):
     evidence_ids: list[str] = Field(default_factory=list, max_length=6)
 
 
+class Requirement(Contract):
+    id: str
+    text: str
+
+
+class CoverageCheck(Contract):
+    requirement_id: str
+    status: Literal["covered", "partial", "missing", "unassessed"]
+    claim_ids: list[str] = Field(default_factory=list, max_length=16)
+    explanation: str = Field(min_length=1, max_length=700)
+
+
 class FactCheckOutput(Contract):
     checks: list[ClaimCheck] = Field(default_factory=list, max_length=16)
+    coverage: list[CoverageCheck] = Field(default_factory=list, max_length=6)
+
+
+class WrittenReport(Contract):
+    title: str
+    markdown: str
+    warnings: list[str] = Field(default_factory=list)
+    claim_ids: list[str] = Field(default_factory=list)
 
 
 class ReportBlock(Contract):
@@ -190,6 +223,11 @@ class ResearchResult(Contract):
     rounds: int
     warnings: list[str] = Field(default_factory=list)
     created_at: str
+    requirements: list[Requirement] = Field(default_factory=list)
+    coverage: list[CoverageCheck] = Field(default_factory=list)
+    reported_claim_ids: list[str] = Field(default_factory=list)
+    stop_reason: str = "legacy_result"
+    policy_version: str = "2.0"
     profile: str = "academic"
     cache_hits: int = 0
     agent_usage: list[AgentUsage] = Field(default_factory=list)
