@@ -1,5 +1,7 @@
 import re
 
+from research_assist.agents.policies.verification import validate_checks
+from research_assist.agents.prompts.writer import INSTRUCTION
 from research_assist.domain.models import (
     Claim,
     ClaimCheck,
@@ -8,6 +10,7 @@ from research_assist.domain.models import (
     ReportSection,
     ResearchRequest,
     WriterOutput,
+    WrittenReport,
 )
 from research_assist.domain.ports import LanguageModel
 
@@ -34,6 +37,18 @@ class WriterAgent:
         evidence: list[Evidence],
         gaps: list[str],
     ) -> tuple[str, str, list[str]]:
+        report = await self.compose(request, claims, checks, evidence, gaps)
+        return report.title, report.markdown, report.warnings
+
+    async def compose(
+        self,
+        request: ResearchRequest,
+        claims: list[Claim],
+        checks: list[ClaimCheck],
+        evidence: list[Evidence],
+        gaps: list[str],
+    ) -> WrittenReport:
+        checks = validate_checks(claims, evidence, checks)
         supported = {check.claim_id: check for check in checks if check.verdict == "supported"}
         verified = [c for c in claims if c.id in supported]
         en = request.language == "en"
@@ -46,17 +61,10 @@ class WriterAgent:
                 else "Chưa có nhận định nào đủ bằng chứng trong các tài liệu đã chọn. "
                 "Hãy tải thêm tài liệu liên quan hoặc thu hẹp câu hỏi."
             )
-            return title, f"# {title}\n\n{message}\n", []
+            return WrittenReport(title=title, markdown=f"# {title}\n\n{message}\n")
         output = await self.llm.generate(
             task="write_report",
-            instruction=(
-                "Organize a research report in the requested language/style. Return a concise "
-                "title and 1–5 thematic sections. Each block contains ONLY a supplied verified "
-                "claim_id. Select and order relevant claims; do NOT rewrite them, create new "
-                "factual assertions in headings, or invent references. Use neutral topic "
-                "headings. For comparison group by comparison dimensions; for literature "
-                "review group by themes, methods, and limitations when supported."
-            ),
+            instruction=(INSTRUCTION),
             payload={
                 "question": request.question,
                 "language": request.language,
@@ -80,7 +88,17 @@ class WriterAgent:
         ev_lookup = {e.id: e for e in evidence}
         cited: list[str] = []
         used, warnings = set(), []
-        title = plain_heading(output.title) or ("Research notes" if en else "Ghi chú nghiên cứu")
+        # Factual prose cannot bypass checking through a model-generated title or heading.
+        title = "Research notes" if en else "Ghi chú nghiên cứu"
+        headings = {
+            "evidence": ("Evidence", "Bằng chứng"),
+            "evidence from sources": ("Evidence", "Bằng chứng"),
+            "methods": ("Methods", "Phương pháp"),
+            "results": ("Results", "Kết quả"),
+            "comparison": ("Comparison", "So sánh"),
+            "limitations": ("Limitations", "Hạn chế"),
+        }
+        headings.update({pair[1].casefold(): pair for pair in list(headings.values())})
         lines = [
             f"# {title}",
             "",
@@ -105,8 +123,12 @@ class WriterAgent:
                     markers.append(f"[{cited.index(eid) + 1}]")
                 items.append(escape_markdown(claim.text) + " " + " ".join(markers))
             if items:
+                pair = headings.get(section.heading.casefold())
+                if pair is None:
+                    pair = ("Evidence", "Bằng chứng")
+                    warnings.append("Writer: đã thay tiêu đề mục ngoài danh sách trung lập.")
                 lines += [
-                    "## " + (plain_heading(section.heading) or "Evidence"),
+                    "## " + pair[0 if en else 1],
                     "",
                     *[f"- {item}" for item in items],
                     "",
@@ -118,6 +140,7 @@ class WriterAgent:
             )
             lines += ["## " + ("Evidence" if en else "Bằng chứng"), ""]
             for claim in verified:
+                used.add(claim.id)
                 markers = []
                 for eid in supported[claim.id].evidence_ids:
                     if eid not in cited:
@@ -156,4 +179,9 @@ class WriterAgent:
                     "không phải xác minh chân lý độc lập.*"
                 )
             )
-        return title, "\n".join(lines) + "\n", list(dict.fromkeys(warnings))
+        return WrittenReport(
+            title=title,
+            markdown="\n".join(lines) + "\n",
+            warnings=list(dict.fromkeys(warnings)),
+            claim_ids=[c.id for c in verified if c.id in used],
+        )

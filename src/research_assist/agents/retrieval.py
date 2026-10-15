@@ -1,3 +1,5 @@
+from research_assist.agents.prompts.retrieval import INSTRUCTION
+from research_assist.domain.errors import ProviderError
 from research_assist.domain.models import ResearchRequest, RetrievalPlan, RetrievedChunk
 from research_assist.domain.ports import LanguageModel, Reranker, SearchTool
 
@@ -6,10 +8,16 @@ class RetrievalAgent:
     name = "retrieval"
 
     def __init__(
-        self, llm: LanguageModel, search: SearchTool, reranker: Reranker, candidate_limit: int = 20
+        self,
+        llm: LanguageModel,
+        search: SearchTool,
+        reranker: Reranker,
+        candidate_limit: int = 20,
+        reranker_fallback: bool = True,
     ) -> None:
         self.llm, self.search, self.reranker = llm, search, reranker
         self.candidate_limit = candidate_limit
+        self.reranker_fallback = reranker_fallback
 
     async def run(
         self,
@@ -18,13 +26,13 @@ class RetrievalAgent:
     ) -> tuple[RetrievalPlan, list[RetrievedChunk], list[str]]:
         plan = await self.llm.generate(
             task="retrieval_plan",
-            instruction=(
-                "Produce 1–3 concise search queries for the question and any evidence gaps. "
-                "Keep the original intent; add an English query if the question is Vietnamese. "
-                "Use only search terms, not answers. Do not invent named papers or results. "
-                "facets are aspects that the sources should cover."
-            ),
-            payload={"question": request.question, "evidence_gaps": gaps, "style": request.style},
+            instruction=(INSTRUCTION),
+            payload={
+                "question": request.question,
+                "evidence_gaps": gaps,
+                "style": request.style,
+                "requirements": request.requirements,
+            },
             schema=RetrievalPlan,
             fallback=lambda: RetrievalPlan(queries=[request.question, *gaps[:2]], facets=[]),
         )
@@ -36,5 +44,10 @@ class RetrievalAgent:
             max(request.top_k, min(request.top_k * 3, self.candidate_limit)),
             request.retrieval_mode,
         )
-        chunks = await self.reranker.rank(request.question, chunks)
+        try:
+            chunks = await self.reranker.rank(request.question, chunks)
+        except ProviderError:
+            if not self.reranker_fallback:
+                raise
+            warnings.append("Reranker không khả dụng; dùng thứ tự hybrid/BM25 cho phiên này.")
         return plan, chunks[: request.top_k], warnings

@@ -1,6 +1,7 @@
 from hashlib import sha256
 
-from research_assist.domain.models import Claim, Evidence, RawClaim, SynthesisOutput
+from research_assist.agents.prompts.summarizer import INSTRUCTION
+from research_assist.domain.models import Claim, Evidence, RawClaim, Requirement, SynthesisOutput
 from research_assist.domain.ports import LanguageModel
 
 
@@ -15,27 +16,27 @@ class SummarizerAgent:
         question: str,
         evidence: list[Evidence],
         language: str,
+        requirements: list[Requirement] | None = None,
     ) -> tuple[list[Claim], list[str], list[str]]:
         if not evidence:
             return [], [], []
         output = await self.llm.generate(
             task="synthesize_claims",
-            instruction=(
-                "Synthesize 4–12 atomic, question-relevant claims in the requested language. "
-                "Each claim must be directly entailed by the cited evidence_ids, and must "
-                "preserve uncertainty and scope. A claim is one factual assertion, not a "
-                "heading, instruction, speculation or recommendation. Compare sources "
-                "only if both have evidence. Never add results, percentages or references. "
-                "Do not put citation markers in the text. Return evidence gaps separately."
-            ),
+            instruction=(INSTRUCTION),
             payload={
                 "question": question,
                 "language": language,
+                "requirements": [r.model_dump() for r in (requirements or [])],
                 "evidence": [e.model_dump() for e in evidence],
             },
             schema=SynthesisOutput,
             fallback=lambda: SynthesisOutput(
-                claims=[RawClaim(text=e.quote, evidence_ids=[e.id]) for e in evidence[:12]], gaps=[]
+                claims=[
+                    RawClaim(text=e.quote, evidence_ids=[e.id])
+                    for e in evidence[:12]
+                    if len(e.quote) <= 1000
+                ],
+                gaps=[],
             ),
         )
         valid_ids = {e.id for e in evidence}

@@ -1,6 +1,7 @@
 import re
 from hashlib import sha256
 
+from research_assist.agents.prompts.reader import INSTRUCTION
 from research_assist.domain.models import Evidence, RawEvidence, ReaderOutput, RetrievedChunk
 from research_assist.domain.ports import LanguageModel
 from research_assist.domain.text import tokens
@@ -30,14 +31,7 @@ class ReaderAgent:
             return [], ["Không tìm thấy đoạn tài liệu liên quan đến câu hỏi."], []
         raw = await self.llm.generate(
             task="read_evidence",
-            instruction=(
-                "Read the supplied chunks and extract up to 20 short VERBATIM quotes "
-                "relevant to the question. Each quote must be a continuous substring of its "
-                "chunk, 20–1400 characters. Preserve numbers, caveats, and limitations. "
-                "Never translate or paraphrase a quote. Use only supplied chunk_id values. "
-                "relevance briefly explains its connection to the question. If the chunks "
-                "do not answer the question, return empty evidence and describe the gaps."
-            ),
+            instruction=(INSTRUCTION),
             payload={"question": question, "chunks": [c.model_dump() for c in chunks]},
             schema=ReaderOutput,
             fallback=lambda: self._extract(question, chunks),
@@ -79,6 +73,8 @@ class ReaderAgent:
             if rejected
             else []
         )
+        if any("OCR" in e.section for e in evidence):
+            warnings.append("Có bằng chứng trích từ OCR; hãy đối chiếu số liệu với ảnh trang gốc.")
         return evidence, raw.gaps, warnings
 
     def _extract(self, question: str, chunks: list[RetrievedChunk]) -> ReaderOutput:
