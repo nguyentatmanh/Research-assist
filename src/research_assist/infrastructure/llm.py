@@ -17,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from research_assist.config import Settings
 from research_assist.domain.errors import ProviderError
+from research_assist.domain.json_output import parse_object
 from research_assist.domain.models import AgentUsage
 from research_assist.domain.ports import T
 
@@ -110,13 +111,17 @@ class HTTPLanguageModel:
             + json.dumps(output_schema, ensure_ascii=False)
         )
         for repair in range(2):
+            if len(system) + len(user) > self.settings.llm_max_input_chars:
+                raise ProviderError(
+                    "Ngữ cảnh vượt RA_LLM_MAX_INPUT_CHARS. Giảm số đoạn hoặc độ dài bằng chứng."
+                )
             text = await self._complete(system, user, output_schema, task)
             try:
                 # A few local models wrap an otherwise valid JSON object in a code fence.
                 text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
                 if len(text) > 200000:
                     raise ValueError("response too large")
-                return schema.model_validate_json(text)
+                return schema.model_validate(parse_object(text))
             except (ValidationError, ValueError):
                 if repair:
                     raise ProviderError(

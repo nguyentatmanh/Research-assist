@@ -1,0 +1,16 @@
+Synthetic software-test fixture, not a scientific publication.
+1 Environment
+A dynamic environment can change while an agent is reasoning. The controller refreshes observations before committing an action.
+2 Perception
+Sensors provide incomplete observations. Agents preserve uncertainty rather than treating an observation as complete knowledge.
+3 Conflict
+Two agents may request the same resource. A reservation protocol allocates exclusive access and releases the resource after completion.
+4 Inference
+Reasoning over all joint actions grows with the number of agents. This fixture uses bounded search and an explicit timeout.
+5 Protocol
+Contract-style bidding allocates a task among available agents. A timeout handles a missing bid; it does not guarantee that a bidder is truthful.
+6 Graphs
+A coordination graph represents local dependencies. Variable elimination can compute joint actions, but its cost depends on graph structure.
+Max-plus exchanges messages between connected agents. This fixture makes no guarantee of an optimal solution on every graph.
+7 Beliefs
+A belief model records uncertain estimates about neighboring agents. Observations update the estimates; an incorrect model can cause a bad decision.

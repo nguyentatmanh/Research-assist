@@ -6,6 +6,7 @@ import { renderBenchmark, renderRoutes } from "./lab.js";
 const state = {
   documents: [],
   selected: new Set(),
+  scopeMode: "selected",
   config: null,
   runId: null,
   working: false,
@@ -97,12 +98,14 @@ function renderDocuments() {
     const input = el("input");
     input.type = "checkbox";
     input.checked = state.selected.has(document.id);
+    input.disabled = state.working;
     input.setAttribute("aria-label", `Chọn ${document.filename}`);
     input.addEventListener("change", () => {
       input.checked
         ? state.selected.add(document.id)
         : state.selected.delete(document.id);
-      renderScope();
+      state.scopeMode = "selected";
+      renderDocuments();
     });
     const text = el("div");
     text.append(
@@ -156,21 +159,36 @@ function renderDocuments() {
     remove.setAttribute("aria-label", `Xóa ${document.filename}`);
     remove.append(icon("trash"));
     remove.addEventListener("click", () => deleteDocument(document));
-    container.append(open, remove);
+    const use = el("button", "text-button", "Hỏi tài liệu này");
+    use.disabled = state.working;
+    use.addEventListener("click", () => {
+      state.selected = new Set([document.id]);
+      state.scopeMode = "selected";
+      renderDocuments();
+      switchView("research");
+      $("#question").focus();
+    });
+    container.append(use, open, remove);
     actions.append(container);
     row.append(actions);
     body.append(row);
   }
+  renderScopePicker();
   renderScope();
 }
 
 function renderScope() {
-  const label = !state.documents.length
-    ? "Chưa có tài liệu"
-    : state.selected.size
-      ? `${state.selected.size} tài liệu được chọn`
-      : `Toàn bộ ${state.documents.length} tài liệu`;
-  $("#scope-label").textContent = label;
+  $("#scope-mode").value = state.scopeMode;
+  $("#scope-label").textContent =
+    state.scopeMode === "all"
+      ? `Toàn bộ ${state.documents.length} tài liệu`
+      : `${state.selected.size} tài liệu được chọn`;
+  const names = state.documents.filter(
+    (d) => state.scopeMode === "all" || state.selected.has(d.id),
+  );
+  $("#scope-filenames").textContent = names.length
+    ? names.map((d) => d.filename).join(" · ")
+    : "Chưa chọn tài liệu";
 }
 
 async function refreshDocuments() {
@@ -183,7 +201,12 @@ function setWorking(value) {
   $("#run-button").disabled = value;
   $("#cancel-button").hidden = !value;
   $("#question").disabled = value;
-  $("#suggestion-area").hidden = value;
+  $("#suggestion-area").hidden = true;
+  $("#activity-cancel").hidden = !value;
+  $("#scope-mode").disabled = value;
+  $("#choose-sources").disabled = value;
+  $("#requirements").disabled = value;
+  renderDocuments();
   $$("#advanced-panel select, #advanced-panel input").forEach((select) => {
     select.disabled = value;
   });
@@ -205,6 +228,19 @@ async function startResearch() {
     toast("Hãy chờ tài liệu được lập chỉ mục.");
     return;
   }
+  if (state.scopeMode === "selected" && !state.selected.size) {
+    $("#scope-dialog").showModal();
+    toast("Chọn ít nhất một tài liệu.", true);
+    return;
+  }
+  const requirements = $("#requirements")
+    .value.split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (requirements.length > 12 || requirements.some((s) => s.length > 500)) {
+    toast("Tối đa 12 yêu cầu, mỗi yêu cầu tối đa 500 ký tự.", true);
+    return;
+  }
   setWorking(true);
   $("#results-section").hidden = true;
   $("#empty-state").hidden = true;
@@ -214,7 +250,12 @@ async function startResearch() {
       method: "POST",
       body: {
         question,
-        document_ids: [...state.selected],
+        requirements: $("#requirements")
+          .value.split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean),
+        document_ids: state.scopeMode === "all" ? [] : [...state.selected],
+        scope_mode: state.scopeMode,
         language: $("#language").value,
         style: $("#report-style").value,
         retrieval_mode: $("#retrieval-mode").value,
@@ -225,6 +266,7 @@ async function startResearch() {
       },
     });
     state.runId = record.id;
+    switchView("activity");
     localStorage.setItem("research-active-run", record.id);
     await pollRun(record.id);
   } catch (error) {
@@ -252,6 +294,7 @@ async function pollRun(runId) {
       continue;
     }
     if (version !== state.pollVersion) return;
+    activityRecord(record);
     renderEvents(record.events, record.status);
     if (["completed", "failed", "cancelled"].includes(record.status)) {
       setWorking(false);
@@ -279,6 +322,7 @@ async function openRun(runId) {
   switchView("research");
   state.runId = runId;
   $("#question").value = record.request.question;
+  $("#requirements").value = (record.request.requirements || []).join("\n");
   $("#question-count").textContent = `${record.request.question.length} / 2000`;
   $("#language").value = record.request.language;
   $("#report-style").value = record.request.style;
@@ -289,6 +333,8 @@ async function openRun(runId) {
     record.request.profile || state.config.workflow_profile || "academic";
   $("#use-cache").checked = record.request.use_cache !== false;
   state.selected = new Set(record.request.document_ids);
+  state.scopeMode = state.selected.size ? "selected" : "all";
+  activityRecord(record);
   renderDocuments();
   localStorage.setItem("research-active-run", runId);
   if (record.result) {
@@ -338,11 +384,17 @@ async function uploadFiles(files) {
       form.append("file", file);
       try {
         const result = await api("/documents", { method: "POST", body: form });
+        if (result.document.warnings?.length)
+          toast(result.document.warnings[0], true);
         toast(
           result.duplicate
             ? `${file.name}: đã có trong kho.`
             : `${file.name}: đã lập chỉ mục ${result.document.chunk_count} đoạn.`,
         );
+        if (!state.working) {
+          state.selected.add(result.document.id);
+          state.scopeMode = "selected";
+        }
         await refreshDocuments();
       } catch (error) {
         toast(`${file.name}: ${error.message}`, true);
@@ -361,7 +413,11 @@ async function seedDocuments(button) {
   button.disabled = true;
   $("#connection-label").textContent = "Đang nạp tài liệu mẫu…";
   try {
-    await api("/documents/demo", { method: "POST" });
+    const seeded = await api("/documents/demo", { method: "POST" });
+    if (!state.working) {
+      state.selected = new Set(seeded.documents.map((d) => d.id));
+      state.scopeMode = "selected";
+    }
     await refreshDocuments();
     toast("Đã nạp ghi chú mẫu. Đây là tài liệu demo do hệ thống biên soạn.");
   } catch (error) {
@@ -398,6 +454,7 @@ function switchView(name) {
   });
   $("#breadcrumb-view").textContent = {
     research: "Nghiên cứu",
+    activity: "Hoạt động agent",
     library: "Kho tài liệu",
     history: "Lịch sử phiên",
     experiments: "Thực nghiệm",
@@ -608,3 +665,109 @@ $("#logout-button").addEventListener("click", async () => {
   }
 });
 initialize();
+
+$("#architecture-button").addEventListener("click", async () => {
+  const root = $("#architecture-content");
+  root.replaceChildren(el("p", "loading-label", "Đang tải luồng agent…"));
+  $("#architecture-dialog").showModal();
+  try {
+    const data = await api("/agents");
+    root.replaceChildren();
+    data.agents.forEach((agent, index) => {
+      const card = el("article", "architecture-card");
+      card.append(
+        el("small", "", `0${index + 1} · ${agent.role}`),
+        el("h3", "", agent.purpose),
+      );
+      const list = el("ol");
+      agent.stages.forEach((stage) => list.append(el("li", "", stage)));
+      card.append(list, el("p", "", agent.guard));
+      root.append(card);
+    });
+  } catch (error) {
+    root.replaceChildren(el("p", "", error.message));
+  }
+});
+
+function renderScopePicker() {
+  const root = $("#scope-documents");
+  const filter = $("#scope-search").value.toLocaleLowerCase("vi");
+  root.replaceChildren();
+  for (const doc of state.documents.filter((d) =>
+    d.filename.toLocaleLowerCase("vi").includes(filter),
+  )) {
+    const row = el("label", "scope-document");
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = state.selected.has(doc.id);
+    box.disabled = state.working;
+    box.setAttribute("aria-label", `Chọn nguồn ${doc.filename}`);
+    box.addEventListener("change", () => {
+      box.checked ? state.selected.add(doc.id) : state.selected.delete(doc.id);
+      state.scopeMode = "selected";
+      renderDocuments();
+    });
+    const text = el("div");
+    text.append(
+      el("strong", "", doc.filename),
+      el(
+        "small",
+        "",
+        `${doc.page_count || "—"} trang · ${doc.chunk_count} đoạn`,
+      ),
+    );
+    row.append(box, text);
+    root.append(row);
+  }
+  if (!root.children.length)
+    root.append(el("p", "", "Không có tài liệu phù hợp."));
+}
+function activityRecord(record) {
+  $("#activity-run").textContent =
+    `${record.request.question} · ${statuses[record.status]}`;
+  $("#export-trace").hidden = false;
+  $("#export-trace").href = `/api/runs/${record.id}/trace`;
+}
+$("#scope-mode").addEventListener("change", (e) => {
+  state.scopeMode = e.target.value;
+  renderScope();
+});
+$("#choose-sources").addEventListener("click", () =>
+  $("#scope-dialog").showModal(),
+);
+$("#scope-search").addEventListener("input", renderScopePicker);
+$("#scope-clear").addEventListener("click", () => {
+  if (!state.working) {
+    state.selected.clear();
+    state.scopeMode = "selected";
+    renderDocuments();
+  }
+});
+$("#back-research").addEventListener("click", () => switchView("research"));
+$("#activity-cancel").addEventListener("click", cancelResearch);
+$("#trace-filter").addEventListener("change", (e) => {
+  $$(".trace-item").forEach(
+    (row) =>
+      (row.hidden =
+        e.target.value !== "all" && row.dataset.agent !== e.target.value),
+  );
+});
+$("#rebuild-button").addEventListener("click", async (e) => {
+  if (
+    !window.confirm(
+      "Chia lại toàn bộ tài liệu bằng cấu hình hiện tại? Báo cáo cũ được giữ lại.",
+    )
+  )
+    return;
+  const button = e.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await api("/documents/rebuild", { method: "POST" });
+    await refreshDocuments();
+    toast(`Đã xây dựng lại ${result.chunks_updated} đoạn.`);
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});

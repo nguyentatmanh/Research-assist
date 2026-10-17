@@ -41,6 +41,7 @@ def test_full_demo_pipeline_and_exports(settings: Settings) -> None:
             "summarizer",
             "fact_checker",
             "writer",
+            "orchestrator",
         }
         assert result["evidence"] and result["checks"]
         assert all(c["verdict"] == "supported" for c in result["checks"])

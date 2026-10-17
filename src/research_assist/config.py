@@ -51,7 +51,18 @@ class Settings(BaseSettings):
     embedding_max_seq_length: int = Field(default=512, ge=64, le=8192)
     local_device: Literal["cpu", "cuda", "mps", "auto"] = "cpu"
     reranker_model: str = ""  # Empty disables the optional local cross-encoder.
+    reranker_device: Literal["inherit", "cpu", "cuda", "mps", "auto"] = "inherit"
+    reranker_batch_size: int = Field(default=4, ge=1, le=64)
+    reranker_max_length: int = Field(default=512, ge=64, le=2048)
+    reranker_failure_policy: Literal["fallback", "error"] = "fallback"
+    search_cache_scopes: int = Field(default=2, ge=0, le=16)
+    search_cache_mb: int = Field(default=128, ge=8, le=2048)
+    pdf_ocr_enabled: bool = False
+    pdf_ocr_language: str = "eng"
+    pdf_ocr_dpi: int = Field(default=150, ge=72, le=300)
+    pdf_ocr_max_pages: int = Field(default=20, ge=1, le=100)
     semantic_min_score: float = Field(default=0.25, ge=-1, le=1)
+    llm_max_input_chars: int = Field(default=120000, ge=2000, le=500000)
     llm_timeout_seconds: float = Field(default=90, ge=1, le=300)
     run_timeout_seconds: float = Field(default=600, ge=10, le=1800)
     llm_max_output_tokens: int = Field(default=5000, ge=512, le=12000)

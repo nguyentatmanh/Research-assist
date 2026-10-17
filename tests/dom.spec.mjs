@@ -50,6 +50,14 @@ try {
   );
   assert.ok(find("#provider-pill").textContent.includes("Demo"));
   checks++;
+  find("#architecture-button").click();
+  await waitFor(
+    () => window.document.querySelectorAll(".architecture-card").length === 5,
+  );
+  assert.ok(find("#architecture-dialog").open);
+  find("#architecture-dialog .close-dialog").click();
+  checks++;
+  find("#requirements").value = "Explain retrieval\nExplain evidence";
   find("#seed-button").click();
   await waitFor(() => find("#nav-doc-count").textContent === "3");
   checks++;
@@ -63,6 +71,9 @@ try {
     5,
   );
   assert.ok(find("#report-content").textContent.includes("RAG"));
+  assert.equal(window.document.querySelectorAll(".coverage-item").length, 2);
+  assert.ok(find("#coverage-panel").textContent.includes("Chưa xác định"));
+  checks++;
   checks++;
   find(".citation-button").click();
   assert.ok(find("#source-dialog").open);
@@ -73,8 +84,8 @@ try {
   assert.equal(find("#checks-content").hidden, false);
   assert.ok(find(".check-status.supported"));
   checks++;
-  find('[data-tab="trace"]').click();
-  assert.equal(window.document.querySelectorAll(".trace-item").length, 10);
+  find('[data-view="activity"]').click();
+  assert.ok(window.document.querySelectorAll(".trace-item").length >= 14);
   checks++;
   find('[data-view="history"]').click();
   await waitFor(() => find(".history-item"));
@@ -105,8 +116,11 @@ try {
     }),
   );
 } finally {
-  await waitFor(() => pendingRequests === 0);
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  await backend.close();
-  dom.window.close();
+  try {
+    await waitFor(() => pendingRequests === 0);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } finally {
+    await backend.close();
+    dom.window.close();
+  }
 }

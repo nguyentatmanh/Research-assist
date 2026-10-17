@@ -105,6 +105,9 @@
               >0</span
             >
           </button>
+          <button class="nav-item" data-view="activity">
+            <svg><use href="#i-settings" /></svg>Hoạt động agent
+          </button>
           <button class="nav-item" data-view="history">
             <svg><use href="#i-clock" /></svg>Lịch sử phiên
           </button>
@@ -170,32 +173,9 @@
           <section id="view-research" class="view">
             <div class="page-heading">
               <div>
-                <div class="eyebrow"><span></span>RESEARCH, WITH EVIDENCE.</div>
-                <h1>Từ tài liệu đến<br /><span>lập luận có nguồn.</span></h1>
-                <p>
-                  Đọc sâu, kết nối ý tưởng và kiểm tra bằng chứng<br
-                    class="desktop-break"
-                  />
-                  với đội ngũ 5 agent nghiên cứu.
-                </p>
-              </div>
-              <div class="heading-visual" aria-hidden="true">
-                <div class="orbital orbital-one"></div>
-                <div class="orbital orbital-two"></div>
-                <div class="paper paper-back"></div>
-                <div class="paper paper-front">
-                  <span class="paper-label">RESEARCH NOTE</span>
-                  <div class="paper-title"></div>
-                  <div class="paper-line"></div>
-                  <div class="paper-line short"></div>
-                  <div class="paper-line"></div>
-                  <div class="paper-citation">
-                    [1] <span></span> <em>verified</em>
-                  </div>
-                </div>
-                <div class="floating-check">
-                  <svg><use href="#i-shield" /></svg>
-                </div>
+                <p class="eyebrow">RESEARCH DESK</p>
+                <h1>Nghiên cứu tài liệu</h1>
+                <p>Đặt câu hỏi. Đối chiếu câu trả lời với nguồn.</p>
               </div>
             </div>
             <div id="mode-notice" class="mode-notice" hidden>
@@ -210,7 +190,7 @@
               <div class="card-label">
                 <svg><use href="#i-search" /></svg
                 ><label id="question-title" for="question"
-                  >Bạn đang muốn khám phá điều gì?</label
+                  >Câu hỏi nghiên cứu</label
                 ><span id="question-count">0 / 2000</span>
               </div>
               <textarea
@@ -219,6 +199,33 @@
                 maxlength="2000"
                 placeholder="Ví dụ: RAG và Self-RAG khác nhau như thế nào về truy xuất và kiểm tra câu trả lời?"
               ></textarea>
+              <details class="requirement-options">
+                <summary>Các ý cần trả lời <span>tùy chọn</span></summary>
+                <label for="requirements"
+                  >Mỗi dòng một ý, tối đa 12. Để trống để hệ thống phân tích câu
+                  hỏi.</label
+                >
+                <textarea
+                  id="requirements"
+                  rows="3"
+                  maxlength="6012"
+                  placeholder="Phương pháp truy xuất
+Cách kiểm tra bằng chứng
+Hạn chế được tác giả nêu"
+                ></textarea>
+              </details>
+              <div class="scope-control">
+                <label
+                  >Phạm vi
+                  <select id="scope-mode">
+                    <option value="selected">Tài liệu đã chọn</option>
+                    <option value="all">Toàn bộ kho</option>
+                  </select></label
+                ><button id="choose-sources" class="secondary-button">
+                  Chọn tài liệu
+                </button>
+                <div id="scope-filenames" class="scope-filenames"></div>
+              </div>
               <div class="question-tools">
                 <div class="question-scope">
                   <svg><use href="#i-stack" /></svg
@@ -240,11 +247,9 @@
               <div id="advanced-panel" class="advanced-panel" hidden>
                 <label
                   >Chế độ chạy<select id="workflow-profile">
-                    <option value="balanced">
-                      Tiết kiệm · 3 lượt LLM/vòng
-                    </option>
+                    <option value="balanced">Cân bằng · Writer local</option>
                     <option value="academic">
-                      Thực nghiệm · 5 lượt LLM/vòng
+                      Học thuật · Writer qua model
                     </option>
                   </select></label
                 >
@@ -269,8 +274,8 @@
                 ><label
                   >Số đoạn<select id="top-k">
                     <option value="4">4 đoạn</option>
-                    <option value="8" selected>8 đoạn</option>
-                    <option value="12">12 đoạn</option>
+                    <option value="8">8 đoạn</option>
+                    <option value="12" selected>12 đoạn</option>
                   </select></label
                 ><label
                   >Số vòng tối đa<select id="max-rounds">
@@ -284,7 +289,7 @@
                 >
               </div>
             </section>
-            <div id="suggestion-area" class="suggestion-area">
+            <div id="suggestion-area" class="suggestion-area" hidden>
               <span>BẮT ĐẦU VỚI</span
               ><button
                 class="prompt-chip"
@@ -298,14 +303,131 @@
                 Tìm hạn chế & khoảng trống <span>↗</span>
               </button>
             </div>
+            <section id="empty-state" class="empty-state">
+              <div class="empty-icon">
+                <svg><use href="#i-file" /></svg>
+              </div>
+              <div>
+                <h3>Bắt đầu từ những tài liệu bạn tin cậy.</h3>
+                <p>
+                  Tải paper, tài liệu kỹ thuật hoặc thử bộ ghi chú mẫu để khám
+                  phá quy trình.
+                </p>
+              </div>
+              <button id="seed-button" class="secondary-button">
+                Thử tài liệu mẫu <span>↗</span>
+              </button>
+            </section>
+            <section id="results-section" class="results-section" hidden>
+              <div class="section-heading results-heading">
+                <div>
+                  <div class="eyebrow">RESEARCH OUTPUT</div>
+                  <h2 id="result-title">Kết quả nghiên cứu</h2>
+                </div>
+                <div class="report-actions">
+                  <button
+                    id="copy-button"
+                    class="icon-button"
+                    aria-label="Sao chép báo cáo"
+                  >
+                    <svg><use href="#i-copy" /></svg></button
+                  ><a id="export-md" class="secondary-button" href="#"
+                    ><svg><use href="#i-download" /></svg>Markdown</a
+                  ><a id="export-json" class="text-button" href="#">JSON</a>
+                </div>
+              </div>
+              <div class="metrics-row" id="metrics-row"></div>
+              <div
+                id="coverage-panel"
+                class="coverage-panel"
+                aria-live="polite"
+                hidden
+              ></div>
+              <div id="result-warnings" class="result-warnings"></div>
+              <div class="result-layout">
+                <article class="report-card">
+                  <div class="tab-row" role="tablist">
+                    <button
+                      role="tab"
+                      aria-selected="true"
+                      class="tab active"
+                      data-tab="report"
+                    >
+                      Báo cáo</button
+                    ><button
+                      role="tab"
+                      aria-selected="false"
+                      class="tab"
+                      data-tab="checks"
+                    >
+                      Kiểm tra nhận định
+                      <span id="checks-count">0</span>
+                    </button>
+                  </div>
+                  <div
+                    id="report-content"
+                    class="report-content tab-content"
+                  ></div>
+                  <div
+                    id="checks-content"
+                    class="checks-content tab-content"
+                    hidden
+                  ></div>
+                </article>
+                <aside class="evidence-panel">
+                  <div class="evidence-panel-heading">
+                    <h3>Bằng chứng</h3>
+                    <span id="evidence-count" class="count">0</span>
+                  </div>
+                  <p class="evidence-note">
+                    Trích nguyên văn · truy vết tới nguồn
+                  </p>
+                  <div id="evidence-list"></div>
+                </aside>
+              </div>
+            </section>
+          </section>
+          <section id="view-activity" class="view" hidden>
+            <div class="simple-heading">
+              <h1>Hoạt động agent</h1>
+              <p id="activity-run">Chưa có phiên nghiên cứu.</p>
+            </div>
+            <div class="activity-toolbar">
+              <button class="secondary-button" id="back-research">
+                Về câu hỏi
+              </button>
+              <button class="secondary-button" id="activity-cancel" hidden>
+                Dừng phiên
+              </button>
+              <a class="text-button" id="export-trace" hidden
+                >Tải nhật ký JSON</a
+              >
+              <label
+                >Lọc agent
+                <select id="trace-filter">
+                  <option value="all">Tất cả</option>
+                  <option value="retrieval">Retrieval</option>
+                  <option value="reader">Reader</option>
+                  <option value="summarizer">Summarizer</option>
+                  <option value="fact_checker">Fact Checker</option>
+                  <option value="writer">Writer</option>
+                  <option value="orchestrator">Orchestrator</option>
+                </select></label
+              >
+            </div>
             <section class="pipeline-panel" aria-labelledby="pipeline-title">
               <div class="section-heading">
                 <div>
-                  <h2 id="pipeline-title">Đội ngũ nghiên cứu của bạn</h2>
-                  <span
-                    >5 vai trò rõ ràng. Một luồng bằng chứng xuyên suốt.</span
-                  >
+                  <h2 id="pipeline-title">Luồng xử lý</h2>
+                  <span>Trạng thái thực tế của phiên đang theo dõi.</span>
                 </div>
+                <button
+                  type="button"
+                  id="architecture-button"
+                  class="text-button"
+                >
+                  Cách các agent phối hợp
+                </button>
                 <span class="subtle-badge" id="pipeline-status">SẴN SÀNG</span>
               </div>
               <div class="agent-pipeline" id="agent-pipeline">
@@ -356,95 +478,11 @@
                 aria-live="polite"
               ></div>
             </section>
-            <section id="empty-state" class="empty-state">
-              <div class="empty-icon">
-                <svg><use href="#i-file" /></svg>
-              </div>
-              <div>
-                <h3>Bắt đầu từ những tài liệu bạn tin cậy.</h3>
-                <p>
-                  Tải paper, tài liệu kỹ thuật hoặc thử bộ ghi chú mẫu để khám
-                  phá quy trình.
-                </p>
-              </div>
-              <button id="seed-button" class="secondary-button">
-                Thử tài liệu mẫu <span>↗</span>
-              </button>
-            </section>
-            <section id="results-section" class="results-section" hidden>
-              <div class="section-heading results-heading">
-                <div>
-                  <div class="eyebrow">RESEARCH OUTPUT</div>
-                  <h2 id="result-title">Kết quả nghiên cứu</h2>
-                </div>
-                <div class="report-actions">
-                  <button
-                    id="copy-button"
-                    class="icon-button"
-                    aria-label="Sao chép báo cáo"
-                  >
-                    <svg><use href="#i-copy" /></svg></button
-                  ><a id="export-md" class="secondary-button" href="#"
-                    ><svg><use href="#i-download" /></svg>Markdown</a
-                  ><a id="export-json" class="text-button" href="#">JSON</a>
-                </div>
-              </div>
-              <div class="metrics-row" id="metrics-row"></div>
-              <div id="result-warnings" class="result-warnings"></div>
-              <div class="result-layout">
-                <article class="report-card">
-                  <div class="tab-row" role="tablist">
-                    <button
-                      role="tab"
-                      aria-selected="true"
-                      class="tab active"
-                      data-tab="report"
-                    >
-                      Báo cáo</button
-                    ><button
-                      role="tab"
-                      aria-selected="false"
-                      class="tab"
-                      data-tab="checks"
-                    >
-                      Kiểm tra nhận định
-                      <span id="checks-count">0</span></button
-                    ><button
-                      role="tab"
-                      aria-selected="false"
-                      class="tab"
-                      data-tab="trace"
-                    >
-                      Nhật ký agent
-                    </button>
-                  </div>
-                  <div
-                    id="report-content"
-                    class="report-content tab-content"
-                  ></div>
-                  <div
-                    id="checks-content"
-                    class="checks-content tab-content"
-                    hidden
-                  ></div>
-                  <div
-                    id="trace-content"
-                    class="trace-content tab-content"
-                    hidden
-                  ></div>
-                </article>
-                <aside class="evidence-panel">
-                  <div class="evidence-panel-heading">
-                    <h3>Bằng chứng</h3>
-                    <span id="evidence-count" class="count">0</span>
-                  </div>
-                  <p class="evidence-note">
-                    Trích nguyên văn · truy vết tới nguồn
-                  </p>
-                  <div id="evidence-list"></div>
-                </aside>
-              </div>
-            </section>
+            <div
+              id="trace-content"
+              class="trace-content"
+              aria-label="Nhật ký hoạt động"
+            ></div>
           </section>
           <section id="view-library" class="view" hidden>
             <div class="simple-heading">
@@ -461,6 +499,9 @@
                 <svg><use href="#i-stack" /></svg>Reindex embedding
               </button>
             </div>
+            <button class="secondary-button" id="rebuild-button">
+              Chia lại đoạn & tạo lại chỉ mục
+            </button>
             <div class="document-table-wrap">
               <table class="document-table">
                 <thead>
@@ -483,7 +524,7 @@
           <section id="view-experiments" class="view" hidden>
             <div class="simple-heading">
               <div class="eyebrow">RESEARCH LAB / 02</div>
-              <h1>Đo lường. Cải thiện. Kiểm chứng.</h1>
+              <h1>Thực nghiệm</h1>
               <p>
                 So sánh retriever gốc và model bạn fine-tune trên cùng tập kiểm
                 tra.
@@ -580,6 +621,23 @@
         </footer>
       </div>
     </div>
+    <dialog id="scope-dialog" aria-labelledby="scope-title">
+      <div class="dialog-heading">
+        <h2 id="scope-title">Chọn tài liệu nghiên cứu</h2>
+        <button class="icon-button close-dialog" aria-label="Đóng">×</button>
+      </div>
+      <input
+        type="search"
+        id="scope-search"
+        placeholder="Tìm theo tên tài liệu"
+        aria-label="Tìm tài liệu"
+      />
+      <div id="scope-documents" class="scope-documents"></div>
+      <div class="scope-actions">
+        <button id="scope-clear" class="text-button">Bỏ chọn tất cả</button>
+        <button class="primary-button close-dialog">Xong</button>
+      </div>
+    </dialog>
     <dialog id="settings-dialog">
       <div class="dialog-heading">
         <div>
@@ -626,6 +684,22 @@ RA_EMBEDDING_MODEL=intfloat/multilingual-e5-small</pre>
       ><button id="logout-button" class="text-button" hidden>
         Đăng xuất workspace
       </button>
+    </dialog>
+    <dialog id="architecture-dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">FIVE AGENTS</span>
+          <h2>Luồng nghiên cứu có kiểm chứng</h2>
+        </div>
+        <button class="icon-button close-dialog" aria-label="Đóng">
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <p class="dialog-note">
+        Orchestrator điều phối tối đa hai vòng. Thiếu bằng chứng thì truy xuất
+        bổ sung; Writer chỉ nhận nội dung đã kiểm tra.
+      </p>
+      <div id="architecture-content"></div>
     </dialog>
     <dialog id="source-dialog">
       <div class="dialog-heading">

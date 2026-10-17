@@ -2,11 +2,13 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Contract(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, allow_inf_nan=False)
+    model_config = ConfigDict(
+        extra="forbid", strict=True, str_strip_whitespace=True, allow_inf_nan=False
+    )
 
 
 class Document(Contract):
@@ -18,12 +20,17 @@ class Document(Contract):
     page_count: int = Field(ge=0)
     chunk_count: int = Field(ge=0)
     created_at: str
+    warnings: list[str] = Field(default_factory=list)
+    index_version: str = "legacy"
 
 
 class SourceSection(Contract):
     text: str
     page: int | None = None
     label: str = "Văn bản"
+    offset: int = 0
+    extraction: Literal["text", "ocr"] = "text"
+    warnings: list[str] = Field(default_factory=list)
 
 
 class Chunk(Contract):
@@ -53,7 +60,10 @@ class RetrievedChunk(Chunk):
 
 class ResearchRequest(Contract):
     question: str = Field(min_length=8, max_length=2000)
-    document_ids: list[str] = Field(default_factory=list, max_length=50)
+    # A frozen all-document scope can contain the entire corpus, including over 50 files.
+    # Membership is validated against the repository when the run is submitted.
+    document_ids: list[str] = Field(default_factory=list)
+    scope_mode: Literal["all", "selected"] = "all"
     top_k: int = Field(default=8, ge=2, le=12)
     language: Literal["vi", "en"] = "vi"
     style: Literal["overview", "comparison", "literature_review"] = "overview"
@@ -61,6 +71,20 @@ class ResearchRequest(Contract):
     max_rounds: int = Field(default=2, ge=1, le=2)
     profile: Literal["balanced", "academic"] | None = None
     use_cache: bool = True
+    requirements: list[str] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="after")
+    def selected_scope(self) -> "ResearchRequest":
+        if self.scope_mode == "selected" and not self.document_ids:
+            raise ValueError("Selected scope requires at least one document")
+        return self
+
+    @field_validator("requirements")
+    @classmethod
+    def requirement_texts(cls, values: list[str]) -> list[str]:
+        if any(not v.strip() or len(v) > 500 for v in values):
+            raise ValueError("Each requirement must have 1–500 characters")
+        return list(dict.fromkeys(v.strip() for v in values))
 
     @field_validator("document_ids")
     @classmethod
@@ -69,8 +93,9 @@ class ResearchRequest(Contract):
 
 
 class RetrievalPlan(Contract):
-    queries: list[str] = Field(min_length=1, max_length=3)
-    facets: list[str] = Field(default_factory=list, max_length=6)
+    queries: list[str] = Field(min_length=1, max_length=13)
+    facets: list[str] = Field(default_factory=list, max_length=12)
+    trace: list[dict[str, object]] = Field(default_factory=list, max_length=13)
 
     @field_validator("queries", "facets")
     @classmethod
@@ -80,9 +105,34 @@ class RetrievalPlan(Contract):
         return list(dict.fromkeys(v.strip() for v in values))
 
 
+class QuestionAspect(Contract):
+    text: str = Field(min_length=1, max_length=500)
+    query: str = Field(min_length=1, max_length=1000)
+
+
+class QuestionPlan(Contract):
+    aspects: list[QuestionAspect] = Field(min_length=1, max_length=12)
+
+
+class EvidenceGap(Contract):
+    requirement_id: str | None = None
+    reason: Literal["no_supported_evidence", "coverage_unassessed", "budget_exhausted"]
+    scope: Literal["retrieved_context"] = "retrieved_context"
+
+
+class GapCheck(Contract):
+    gap_index: int = Field(ge=0, le=15)
+    status: Literal["resolved", "unresolved", "unassessed"]
+    requirement_ids: list[str] = Field(default_factory=list, max_length=12)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=24)
+    explanation: str = Field(min_length=1, max_length=700)
+
+
 class RawEvidence(Contract):
     chunk_id: str = Field(min_length=1, max_length=100)
-    quote: str = Field(min_length=20, max_length=1400)
+    quote: str = Field(default="", max_length=1400)
+    unit_id: str | None = None
+    requirement_ids: list[str] = Field(default_factory=list, max_length=12)
     relevance: str = Field(min_length=1, max_length=500)
 
 
@@ -105,6 +155,8 @@ class Evidence(RawEvidence):
 class RawClaim(Contract):
     text: str = Field(min_length=10, max_length=1000)
     evidence_ids: list[str] = Field(min_length=1, max_length=6)
+    requirement_ids: list[str] = Field(default_factory=list, max_length=12)
+    kind: Literal["source_finding", "grounded_recommendation"] = "source_finding"
 
 
 class SynthesisOutput(Contract):
@@ -126,8 +178,29 @@ class ClaimCheck(Contract):
     evidence_ids: list[str] = Field(default_factory=list, max_length=6)
 
 
+class Requirement(Contract):
+    id: str
+    text: str
+
+
+class CoverageCheck(Contract):
+    requirement_id: str
+    status: Literal["covered", "partial", "missing", "unassessed"]
+    claim_ids: list[str] = Field(default_factory=list, max_length=16)
+    explanation: str = Field(min_length=1, max_length=700)
+
+
 class FactCheckOutput(Contract):
     checks: list[ClaimCheck] = Field(default_factory=list, max_length=16)
+    coverage: list[CoverageCheck] = Field(default_factory=list, max_length=12)
+    gap_checks: list[GapCheck] = Field(default_factory=list, max_length=16)
+
+
+class WrittenReport(Contract):
+    title: str
+    markdown: str
+    warnings: list[str] = Field(default_factory=list)
+    claim_ids: list[str] = Field(default_factory=list)
 
 
 class ReportBlock(Contract):
@@ -142,7 +215,7 @@ class ReportSection(Contract):
 
 class WriterOutput(Contract):
     title: str = Field(min_length=1, max_length=180)
-    sections: list[ReportSection] = Field(default_factory=list, max_length=6)
+    sections: list[ReportSection] = Field(default_factory=list, max_length=13)
 
 
 class AgentEvent(Contract):
@@ -190,6 +263,13 @@ class ResearchResult(Contract):
     rounds: int
     warnings: list[str] = Field(default_factory=list)
     created_at: str
+    requirements: list[Requirement] = Field(default_factory=list)
+    coverage: list[CoverageCheck] = Field(default_factory=list)
+    reported_claim_ids: list[str] = Field(default_factory=list)
+    stop_reason: str = "legacy_result"
+    policy_version: str = "unclassified"
+    gap_details: list[EvidenceGap] = Field(default_factory=list)
+    document_ids: list[str] = Field(default_factory=list)
     profile: str = "academic"
     cache_hits: int = 0
     agent_usage: list[AgentUsage] = Field(default_factory=list)
@@ -197,6 +277,8 @@ class ResearchResult(Contract):
 
 
 class RunRecord(Contract):
+    scope_documents: list[Document] = Field(default_factory=list)
+    corpus_revision: int | None = None
     id: str
     status: Literal["queued", "running", "completed", "failed", "cancelled"]
     request: ResearchRequest

@@ -21,7 +21,7 @@ async def test_route_cache_invalidation_and_bypass(tmp_path: Path) -> None:
         workflow_profile="academic",
         agent_routes={
             "retrieval": AgentRoute(
-                model="planner-v1", input_usd_per_million=1, output_usd_per_million=2
+                model="planner-primary", input_usd_per_million=1, output_usd_per_million=2
             )
         },
         _env_file=None,
@@ -60,12 +60,12 @@ async def test_route_cache_invalidation_and_bypass(tmp_path: Path) -> None:
         with usage_scope("academic", cache_enabled=False) as bypassed:
             await invoke()
         assert bypassed.calls == 1
-        router.routes["retrieval"].llm_model = "planner-v2"
-        router.models["retrieval"].model = "planner-v2"
+        router.routes["retrieval"].llm_model = "planner-alternate"
+        router.models["retrieval"].model = "planner-alternate"
         with usage_scope("academic") as changed:
             await invoke()
         assert changed.calls == 1
-        assert models == ["planner-v1", "planner-v1", "planner-v2"]
+        assert models == ["planner-primary", "planner-primary", "planner-alternate"]
 
 
 async def test_token_guard_and_deepseek_json_mode(settings: Settings) -> None:

@@ -12,12 +12,14 @@ import httpx
 from pydantic import ValidationError
 
 from research_assist.config import AgentRole, AgentRoute, Settings
+from research_assist.domain.metadata import EVIDENCE_POLICY
 from research_assist.domain.models import AgentUsage
 from research_assist.domain.ports import LanguageModel, T
 from research_assist.infrastructure.llm import DemoLanguageModel, HTTPLanguageModel, current_usage
 from research_assist.infrastructure.repository import Repository
 
 TASK_ROLES: dict[str, AgentRole] = {
+    "question_plan": "retrieval",
     "retrieval_plan": "retrieval",
     "read_evidence": "reader",
     "synthesize_claims": "summarizer",
@@ -57,7 +59,7 @@ class ModelRouter:
         self.models: dict[AgentRole, LanguageModel] = {}
         self.routes: dict[AgentRole, Settings] = {}
         gates: dict[str, RequestGate] = {}
-        for role in TASK_ROLES.values():
+        for role in dict.fromkeys(TASK_ROLES.values()):
             route = settings.for_agent(role)
             self.routes[role] = route
             gate = gates.setdefault(
@@ -80,6 +82,9 @@ class ModelRouter:
                 "provider": model.name,
                 "model": model.model,
                 "execution": self.execution(role),
+                "planner_execution": ("demo" if model.name == "demo" else "api")
+                if role == "retrieval"
+                else None,
                 "max_output_tokens": self.routes[role].llm_max_output_tokens,
                 "thinking_level": self.routes[role].gemini_thinking_level,
             }
@@ -105,6 +110,8 @@ class ModelRouter:
         role = TASK_ROLES[task]
         model, route = self.models[role], self.routes[role]
         mode = self.execution(role)
+        if task == "question_plan":
+            mode = "demo" if model.name == "demo" else "api"
         usage = current_usage.get()
         before = (usage.calls, usage.input_tokens, usage.output_tokens) if usage else (0, 0, 0)
         begin, hit = time.perf_counter(), False
@@ -123,7 +130,7 @@ class ModelRouter:
             cache_key = hashlib.sha256(
                 json.dumps(
                     {
-                        "version": 2,
+                        "policy": EVIDENCE_POLICY,
                         "task": task,
                         "provider": model.name,
                         "model": model.model,

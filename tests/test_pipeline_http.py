@@ -9,29 +9,42 @@ from research_assist.config import Settings
 from research_assist.domain.models import ResearchRequest
 
 
-@pytest.mark.parametrize("profile,expected_calls", [("academic", 5), ("balanced", 3)])
+@pytest.mark.parametrize("profile,expected_calls", [("academic", 4), ("balanced", 3)])
+@pytest.mark.parametrize("complex_question", [False, True])
 async def test_five_agents_call_real_http_adapter_without_demo_fallback(
-    settings: Settings, profile: str, expected_calls: int
+    settings: Settings, profile: str, expected_calls: int, complex_question: bool
 ) -> None:
     settings.llm_provider = "openai"
     settings.workflow_profile = profile
     settings.openai_api_key = SecretStr("test-only-key")
     tasks = []
+    question = (
+        "Compare RAG retrieval and source evidence"
+        if complex_question
+        else "Explain how RAG uses evidence"
+    )
+    expected_calls += int(complex_question)
 
     def provider(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
         task = body["response_format"]["json_schema"]["name"]
         payload = json.loads(body["messages"][1]["content"])
         tasks.append(task)
-        if task == "retrieval_plan":
-            output = {"queries": ["RAG evidence"], "facets": []}
+        if task == "question_plan":
+            output = {
+                "aspects": [
+                    {"text": "Retrieval", "query": "RAG retrieval"},
+                    {"text": "Evidence", "query": "RAG evidence"},
+                ]
+            }
         elif task == "read_evidence":
-            chunk = payload["chunks"][0]
+            chunk = payload["source_units"][0]
             output = {
                 "evidence": [
                     {
-                        "chunk_id": chunk["id"],
-                        "quote": chunk["text"],
+                        "chunk_id": chunk["chunk_id"],
+                        "unit_id": chunk["unit_id"],
+                        "quote": "",
                         "relevance": "Relevant to RAG",
                     }
                 ],
@@ -55,12 +68,14 @@ async def test_five_agents_call_real_http_adapter_without_demo_fallback(
                     }
                 ]
             }
-        else:
+        elif task == "write_report":
             claim = payload["verified_claims"][0]
             output = {
                 "title": "RAG overview",
                 "sections": [{"heading": "Evidence", "blocks": [{"claim_id": claim["id"]}]}],
             }
+        else:
+            raise AssertionError(f"Unexpected provider task: {task}")
         return httpx.Response(
             200,
             json={
@@ -74,9 +89,7 @@ async def test_five_agents_call_real_http_adapter_without_demo_fallback(
         await container.documents.ingest(
             b"RAG combines retrieval with generation and source evidence.", "paper.txt"
         )
-        record = container.runs.submit(
-            ResearchRequest(question="Explain how RAG uses evidence", max_rounds=1)
-        )
+        record = container.runs.submit(ResearchRequest(question=question, max_rounds=1))
         await container.runs.tasks[record.id]
         finished = container.repository.run(record.id)
         assert finished.status == "completed", finished.error
@@ -88,17 +101,17 @@ async def test_five_agents_call_real_http_adapter_without_demo_fallback(
             10 * expected_calls,
         )
         expected_tasks = [
-            "retrieval_plan",
             "read_evidence",
             "synthesize_claims",
             "check_claims",
             "write_report",
         ]
-        assert tasks == (expected_tasks if profile == "academic" else expected_tasks[1:4])
+        expected_tasks = expected_tasks if profile == "academic" else expected_tasks[:3]
+        if complex_question:
+            expected_tasks.insert(0, "question_plan")
+        assert tasks == expected_tasks
         assert "[1]" in finished.result.markdown
-        repeated = container.runs.submit(
-            ResearchRequest(question="Explain how RAG uses evidence", max_rounds=1)
-        )
+        repeated = container.runs.submit(ResearchRequest(question=question, max_rounds=1))
         await container.runs.tasks[repeated.id]
         reused = container.repository.run(repeated.id)
         assert reused.result is not None, reused.error

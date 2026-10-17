@@ -5,7 +5,7 @@ from pathlib import Path
 def test_domain_and_agents_do_not_depend_on_infrastructure_or_transport() -> None:
     root = Path(__file__).parents[1] / "src" / "research_assist"
     for layer in ("domain", "agents"):
-        for file in (root / layer).glob("*.py"):
+        for file in (root / layer).rglob("*.py"):
             tree = ast.parse(file.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 names = []

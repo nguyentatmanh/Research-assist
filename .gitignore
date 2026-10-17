@@ -20,13 +20,3 @@ evaluation-results/
 node_modules/
 models/
 evaluation/
-notebooks/
-*.ipynb
-
-# Documentation
-SOURCE.md
-SOURCES.md
-docs/*.md
-docs/**/*.md
-!docs/AGENTS_ARCHITECTURE.md
-!docs/COST_AND_LATENCY.md

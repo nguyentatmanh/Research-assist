@@ -1,0 +1,4 @@
+SYNTHETIC TEST FIXTURE — NOT A REAL SCIENTIFIC PAPER.
+Study A combines BM25 retrieval with a dense retriever to retrieve evidence for generated answers.
+Study A used 50 documents, not 500. It reports latency measured on one CPU, but does not report accuracy.
+The authors note that scanned documents require OCR and that inaccurate OCR can change numerical evidence.

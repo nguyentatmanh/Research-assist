@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from research_assist.config import Settings
 from research_assist.domain.errors import CapacityError, DocumentError
+from research_assist.domain.metadata import SECTION_INDEX
 from research_assist.domain.models import Document, IndexedChunk
 from research_assist.domain.ports import Embedder
 from research_assist.infrastructure.documents import chunk_sections, extract, safe_filename
@@ -15,6 +16,7 @@ class DocumentService:
     def __init__(self, repository: Repository, embedder: Embedder, settings: Settings) -> None:
         self.repository, self.embedder, self.settings = repository, embedder, settings
         self.lock = asyncio.Lock()
+        self.maintenance = False
         self.sample_dir = Path(__file__).resolve().parents[1] / "sample_data"
 
     async def ingest(self, data: bytes, filename: str) -> tuple[Document, bool]:
@@ -38,6 +40,8 @@ class DocumentService:
                 page_count=len(sections) if Path(filename).suffix.lower() == ".pdf" else 0,
                 chunk_count=0,
                 created_at=now(),
+                warnings=[message for section in sections for message in section.warnings],
+                index_version=SECTION_INDEX,
             )
             chunks = await asyncio.to_thread(chunk_sections, sections, document, self.settings)
             if not chunks:
@@ -73,16 +77,67 @@ class DocumentService:
             self.repository.delete_document(document_id)
 
     async def reindex(self) -> int:
-        async with self.lock:
-            chunks = self.repository.chunks()
-            if not chunks:
-                return 0
-            vectors = await self.embedder.embed([chunk.text for chunk in chunks])
-            for index, chunk in enumerate(chunks):
-                chunk.vector = vectors[index] if vectors else None
-                chunk.vector_model = self.embedder.fingerprint
-            self.repository.update_vectors(chunks)
-            return len(chunks)
+        if self.maintenance:
+            raise CapacityError("Đang xây dựng lại chỉ mục.")
+        self.maintenance = True
+        try:
+            async with self.lock:
+                chunks = self.repository.chunks()
+                if not chunks:
+                    return 0
+                vectors = await self.embedder.embed([chunk.text for chunk in chunks])
+                for index, chunk in enumerate(chunks):
+                    chunk.vector = vectors[index] if vectors else None
+                    chunk.vector_model = self.embedder.fingerprint
+                self.repository.update_vectors(chunks)
+                return len(chunks)
+        finally:
+            self.maintenance = False
+
+    async def rebuild(self) -> int:
+        """Stage all extraction/chunks/vectors; replace in one transaction only on success."""
+        if self.maintenance:
+            raise CapacityError("Đang xây dựng lại chỉ mục.")
+        self.maintenance = True
+        try:
+            async with self.lock:
+                staged = []
+                count = 0
+                for document in self.repository.documents():
+                    data = await asyncio.to_thread(self.repository.blob(document.id).read_bytes)
+                    sections = await asyncio.to_thread(
+                        extract, data, document.filename, self.settings
+                    )
+                    chunks = await asyncio.to_thread(
+                        chunk_sections, sections, document, self.settings
+                    )
+                    count += len(chunks)
+                    if not chunks or count > self.settings.max_chunks:
+                        raise DocumentError(
+                            "Rebuild vượt giới hạn hoặc không tạo được chunk; chỉ mục cũ được giữ."
+                        )
+                    vectors = await self.embedder.embed([c.text for c in chunks])
+                    indexed = [
+                        IndexedChunk(
+                            **c.model_dump(),
+                            vector=vectors[i] if vectors else None,
+                            vector_model=self.embedder.fingerprint,
+                        )
+                        for i, c in enumerate(chunks)
+                    ]
+                    document = document.model_copy(
+                        update={
+                            "chunk_count": len(indexed),
+                            "index_version": SECTION_INDEX,
+                            "warnings": [w for section in sections for w in section.warnings],
+                        }
+                    )
+                    staged.append((document, indexed))
+                # No await: cancellation cannot split this commit. Old reports own source snapshots.
+                self.repository.replace_index(staged)
+                return count
+        finally:
+            self.maintenance = False
 
     async def seed(self) -> list[Document]:
         documents = []

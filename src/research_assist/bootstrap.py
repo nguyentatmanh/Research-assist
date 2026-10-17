@@ -29,6 +29,7 @@ class Container:
     client: httpx.AsyncClient
     embedder: Embedder
     router: ModelRouter
+    search: HybridSearch
 
     async def close(self) -> None:
         await self.runs.close()
@@ -60,14 +61,27 @@ def build_container(
     elif settings.embedding_provider == "openai":
         embedder = APIEmbeddings(settings, client)
     reranker: Reranker = (
-        LocalReranker(settings.reranker_model, device=settings.local_device)
+        LocalReranker(
+            settings.reranker_model,
+            device=settings.local_device
+            if settings.reranker_device == "inherit"
+            else settings.reranker_device,
+            batch_size=settings.reranker_batch_size,
+            max_length=settings.reranker_max_length,
+        )
         if settings.reranker_model
         else NoReranker()
     )
     search = HybridSearch(repository, embedder, settings)
     pipeline = ResearchPipeline(
         llm,
-        RetrievalAgent(llm, search, reranker, settings.rerank_candidates),
+        RetrievalAgent(
+            llm,
+            search,
+            reranker,
+            settings.rerank_candidates,
+            settings.reranker_failure_policy == "fallback",
+        ),
         ReaderAgent(llm),
         SummarizerAgent(llm),
         FactCheckerAgent(llm),
@@ -83,4 +97,5 @@ def build_container(
         client,
         embedder,
         llm,
+        search,
     )

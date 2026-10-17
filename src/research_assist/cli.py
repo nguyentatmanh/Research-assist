@@ -11,7 +11,10 @@ from research_assist.config import Settings
 def main() -> None:
     parser = argparse.ArgumentParser(description="Research Assist — five-agent RAG")
     parser.add_argument(
-        "command", choices=["serve", "seed", "reindex", "ask"], nargs="?", default="serve"
+        "command",
+        choices=["serve", "seed", "reindex", "rebuild", "ask"],
+        nargs="?",
+        default="serve",
     )
     parser.add_argument("question", nargs="?")
     parser.add_argument("--host")
@@ -45,6 +48,8 @@ async def run_command(command: str, question: str | None, settings: Settings) ->
             )
         elif command == "reindex":
             print(f"Updated {await container.documents.reindex()} chunks")
+        elif command == "rebuild":
+            print(f"Rebuilt {await container.documents.rebuild()} chunks")
         elif command == "ask":
             if not question:
                 raise SystemExit("Usage: research-assist ask 'your research question'")

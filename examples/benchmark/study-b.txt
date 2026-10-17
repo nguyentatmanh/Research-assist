@@ -1,0 +1,4 @@
+SYNTHETIC TEST FIXTURE — NOT A REAL SCIENTIFIC PAPER.
+Study B uses a cross-encoder to rerank retrieved passages before answer generation.
+The reranker considers a question and passage together. Only the highest ranked passages are sent to the reader.
+The authors do not claim that reranking guarantees a correct answer. The reader still checks each citation.

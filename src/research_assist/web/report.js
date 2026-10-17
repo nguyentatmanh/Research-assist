@@ -63,27 +63,44 @@ export function renderMarkdown(markdown) {
   const root = $("#report-content");
   root.replaceChildren();
   let list = null;
+  let target = root;
   for (const line of markdown.split("\n")) {
+    if (
+      [
+        "## Sources",
+        "## Nguồn trích dẫn",
+        "## Question coverage",
+        "## Mức đáp ứng câu hỏi",
+      ].includes(line)
+    ) {
+      const details = el("details", "report-appendix");
+      details.append(el("summary", "", line.slice(3)));
+      root.append(details);
+      target = details;
+      list = null;
+      continue;
+    }
+    if (line.startsWith("## ")) target = root;
     if (!line.trim()) {
       list = null;
       continue;
     }
     if (line.startsWith("# "))
-      root.append(el("h1", "", unescapeMarkdown(line.slice(2))));
+      target.append(el("h1", "", unescapeMarkdown(line.slice(2))));
     else if (line.startsWith("## "))
-      root.append(el("h2", "", unescapeMarkdown(line.slice(3))));
+      target.append(el("h2", "", unescapeMarkdown(line.slice(3))));
     else if (line.startsWith("- ")) {
       if (!list) {
         list = el("ul");
-        root.append(list);
+        target.append(list);
       }
       const item = el("li");
       appendCitations(item, line.slice(2));
       list.append(item);
     } else if (line.startsWith("> "))
-      root.append(el("blockquote", "", unescapeMarkdown(line.slice(2))));
+      target.append(el("blockquote", "", unescapeMarkdown(line.slice(2))));
     else if (/^\[\d+\]/.test(line)) {
-      root.append(
+      target.append(
         el(
           "p",
           "report-source-label",
@@ -95,11 +112,13 @@ export function renderMarkdown(markdown) {
       line.endsWith("*") &&
       !line.startsWith("**")
     ) {
-      root.append(el("p", "report-note", unescapeMarkdown(line.slice(1, -1))));
+      target.append(
+        el("p", "report-note", unescapeMarkdown(line.slice(1, -1))),
+      );
     } else {
       const paragraph = el("p");
       appendCitations(paragraph, line.replace(/\*\*/g, ""));
-      root.append(paragraph);
+      target.append(paragraph);
     }
   }
 }
@@ -110,7 +129,7 @@ export function selectTab(name) {
     tab.classList.toggle("active", active);
     tab.setAttribute("aria-selected", String(active));
   });
-  ["report", "checks", "trace"].forEach((tab) => {
+  ["report", "checks"].forEach((tab) => {
     $(`#${tab}-content`).hidden = tab !== name;
   });
 }
@@ -145,9 +164,21 @@ export function renderEvents(events, status) {
     live.textContent = `Vòng ${last.round} · ${agentLabels[last.agent] || last.agent} · ${last.message}`;
   }
   const trace = $("#trace-content");
-  trace.replaceChildren();
+  const key = events[0]?.created_at || "empty";
+  if (trace.dataset.eventKey !== key) {
+    trace.replaceChildren();
+    trace.dataset.eventKey = key;
+  }
+  const existing = new Set(
+    [...trace.children].map((row) => Number(row.dataset.sequence)),
+  );
   for (const event of events) {
+    if (existing.has(event.sequence)) continue;
     const item = el("div", "trace-item");
+    item.dataset.sequence = event.sequence;
+    item.dataset.agent = event.agent;
+    const filter = $("#trace-filter")?.value || "all";
+    item.hidden = filter !== "all" && filter !== event.agent;
     item.append(
       el("span", "trace-sequence", String(event.sequence).padStart(2, "0")),
     );
@@ -160,6 +191,26 @@ export function renderEvents(events, status) {
       ),
     );
     content.append(el("p", "", event.message));
+    if (event.details && Object.keys(event.details).length) {
+      const facts = el("div", "trace-facts");
+      for (const name of [
+        "execution",
+        "model",
+        "calls",
+        "input_tokens",
+        "output_tokens",
+        "cache_hits",
+      ]) {
+        if (event.details[name] != null)
+          facts.append(el("span", "", `${name}: ${event.details[name]}`));
+      }
+      const detail = el("details");
+      detail.append(
+        el("summary", "", "Truy vấn, nguồn & quyết định"),
+        el("pre", "", JSON.stringify(event.details, null, 2)),
+      );
+      content.append(facts, detail);
+    }
     item.append(
       content,
       el(
@@ -211,6 +262,7 @@ export function renderResult(result) {
   $("#checks-count").textContent = String(result.checks.length);
   renderMarkdown(result.markdown);
   renderChecks(result);
+  renderCoverage(result);
   renderEvidence(result.evidence);
   renderEvents(result.events, "completed");
   selectTab("report");
@@ -347,5 +399,59 @@ export async function copyReport() {
       "Trình duyệt chưa cho phép clipboard. Bạn có thể tải bản Markdown.",
       true,
     );
+  }
+}
+
+function renderCoverage(result) {
+  const panel = $("#coverage-panel");
+  panel.replaceChildren();
+  panel.hidden = !(result.coverage || []).length;
+  if (panel.hidden) return;
+  const detail = el("details");
+  const covered = result.coverage.filter((r) => r.status === "covered").length;
+  detail.append(
+    el(
+      "summary",
+      "",
+      `Độ đầy đủ: ${covered}/${result.coverage.length} ý được model đánh giá đã đáp ứng`,
+    ),
+  );
+  panel.append(detail);
+  panel.append(
+    el(
+      "p",
+      "coverage-note",
+      "Đánh giá của model về độ đầy đủ; bạn có thể đối chiếu từng nhận định với nguồn.",
+    ),
+  );
+  const requirements = new Map(
+    (result.requirements || []).map((r) => [r.id, r.text]),
+  );
+  const labels = {
+    covered: "Đủ ý theo model",
+    partial: "Một phần",
+    missing: "Thiếu bằng chứng",
+    unassessed: "Chưa xác định",
+  };
+  for (const row of result.coverage) {
+    const item = el("div", "coverage-item");
+    item.append(
+      el(
+        "span",
+        `coverage-status ${row.status}`,
+        labels[row.status] || "Chưa xác định",
+      ),
+    );
+    const content = el("div");
+    content.append(
+      el(
+        "strong",
+        "",
+        requirements.get(row.requirement_id) || row.requirement_id,
+      ),
+      el("p", "", row.explanation),
+    );
+    item.append(content);
+    detail.append(item);
   }
 }

@@ -1,7 +1,7 @@
 """Token windows preserve original character offsets for verifiable quotes."""
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 from research_assist.config import Settings
@@ -16,7 +16,7 @@ def tokenizer_for(model: str, revision: str) -> Any:
     options: dict[str, Any] = {"use_fast": True, "trust_remote_code": False}
     if revision:
         options["revision"] = revision
-    tokenizer = AutoTokenizer.from_pretrained(model, **options)
+    tokenizer = cast(Any, AutoTokenizer).from_pretrained(model, **options)
     if not tokenizer.is_fast:
         raise ValueError("A fast tokenizer is required for exact offsets")
     return tokenizer
@@ -50,8 +50,8 @@ def token_chunks(
                             page=section.page,
                             section=section.label,
                             ordinal=len(chunks),
-                            start=start,
-                            end=start + len(text),
+                            start=section.offset + start,
+                            end=section.offset + start + len(text),
                         )
                     )
                 if index + settings.chunk_tokens >= len(offsets):
