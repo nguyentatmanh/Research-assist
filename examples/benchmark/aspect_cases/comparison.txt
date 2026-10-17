@@ -1,0 +1,4 @@
+Synthetic comparison note.
+Method A uses a centralized coordinator and has a single coordination point.
+Method B uses distributed messages and pays communication overhead.
+The note does not establish that one method is universally superior. Selection depends on the failure and communication requirements.

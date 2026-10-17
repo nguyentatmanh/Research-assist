@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "research-assist"
 version = "0.0.0"
 description = "Evidence-first five-agent research assistant with a local web workspace"
-readme = "README.md"
+readme = {text = "Evidence-first five-agent research assistant with a local web workspace.", content-type = "text/plain"}
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = [

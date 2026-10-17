@@ -1,0 +1,5 @@
+{"id":"retrieval","question":"How does Study A retrieve evidence for generated answers?","files":["study-a.txt","study-b.txt"],"relevant_sources":["study-a.txt"],"answerable":true,"label_source":"synthetic"}
+{"id":"numbers","question":"Did Study A use 50 documents or 500 documents?","files":["study-a.txt"],"relevant_sources":["study-a.txt"],"answerable":true,"label_source":"synthetic"}
+{"id":"comparison","question":"Compare the retrieval in Study A and the reranking in Study B.","requirements":["Describe Study A retrieval.","Describe Study B reranking.","Explain limitations stated in the sources."],"files":["study-a.txt","study-b.txt"],"relevant_sources":["study-a.txt","study-b.txt"],"answerable":true,"label_source":"synthetic"}
+{"id":"unanswerable","question":"What measured accuracy does Study A achieve?","files":["study-a.txt"],"answerable":false,"label_source":"synthetic"}
+{"id":"crosslingual","question":"Nghiên cứu B kiểm tra trích dẫn và sử dụng reranker như thế nào?","language":"vi","files":["study-b.txt"],"relevant_sources":["study-b.txt"],"answerable":true,"label_source":"synthetic"}

@@ -1,0 +1,4 @@
+Synthetic scheduling experiment.
+The scheduler assigns a role to each worker. Role restrictions reduce the permitted actions for that worker.
+The test used 12 workers with a centralized coordinator. Network failures were not tested.
+A worker retries a failed task at most twice. After that, the coordinator records a failure rather than claiming success.

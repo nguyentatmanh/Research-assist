@@ -94,7 +94,7 @@ async def test_changed_embedding_fingerprint_does_not_mix_vector_spaces(settings
     await service.ingest(
         b"Distant galaxies contain billions of stars and planetary systems.", "space.txt"
     )
-    embedder.fingerprint = "test:new-model:v2"
+    embedder.fingerprint = "test:new-model:alternate"
     results, warnings = await HybridSearch(repository, embedder, settings).search(
         ["astronomy"], [], 4, "hybrid"
     )
@@ -114,3 +114,25 @@ async def test_embedding_dimension_change_requires_reindex(settings: Settings) -
     )
     with pytest.raises(ProviderError, match="Chiều"):
         await HybridSearch(repository, embedder, settings).search(["astronomy"], [], 4, "hybrid")
+
+
+@pytest.mark.parametrize(
+    "revision,expected", [("same-checkpoint", True), ("other-checkpoint", False)]
+)
+async def test_vector_format_labels_preserve_checkpoint_identity(
+    settings: Settings, revision: str, expected: bool
+) -> None:
+    repository = Repository(settings.data_dir)
+    embedder = TinyEmbedder()
+    embedder.fingerprint = "sentence-transformers:science:e5:rev:same-checkpoint:512:v7"
+    document, _ = await DocumentService(repository, embedder, settings).ingest(
+        b"Distant galaxies contain billions of stars and planetary systems.", "space.txt"
+    )
+    stored = repository.chunks([document.id])[0].vector_model
+    embedder.fingerprint = f"sentence-transformers:science:e5:rev:{revision}:512:normalized"
+    results, warnings = await HybridSearch(repository, embedder, settings).search(
+        ["astronomy"], [document.id], 4, "hybrid"
+    )
+    assert bool(results) is expected
+    assert bool(warnings) is not expected
+    assert repository.chunks([document.id])[0].vector_model == stored

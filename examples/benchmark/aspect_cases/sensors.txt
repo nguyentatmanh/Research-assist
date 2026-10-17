@@ -1,0 +1,3 @@
+Synthetic sensor experiment.
+The test used 50 sensors, not 500. The sensors were evaluated only in a static indoor environment.
+No latency measurement is reported in this fixture. Partial observations were represented as uncertain estimates.
