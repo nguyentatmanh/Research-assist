@@ -14,7 +14,7 @@ from research_assist.domain.errors import ProviderError
 from research_assist.domain.models import IndexedChunk, RetrievedChunk
 from research_assist.domain.ports import Embedder
 from research_assist.domain.text import tokens
-from research_assist.infrastructure.embeddings import validate_vectors
+from research_assist.infrastructure.embeddings import embedding_identity, validate_vectors
 from research_assist.infrastructure.local_runtime import INFERENCE_LOCK
 from research_assist.infrastructure.repository import Repository
 
@@ -84,7 +84,12 @@ class HybridSearch:
 
     def _build(self, scope: list[str], fingerprint: str | None) -> SearchSnapshot:
         revision, chunks = self.repository.retrieval_snapshot(scope)
-        dense = [c for c in chunks if fingerprint and c.vector_model == fingerprint and c.vector]
+        identity = embedding_identity(fingerprint)
+        dense = [
+            c
+            for c in chunks
+            if identity and embedding_identity(c.vector_model) == identity and c.vector
+        ]
         try:
             matrix = (
                 np.asarray([c.vector for c in dense], dtype=np.float32)
@@ -167,6 +172,48 @@ class HybridSearch:
         elif use_dense and snapshot.dense_chunks:
             raise ProviderError("Embedding không trả về vector cho truy vấn.")
         return await asyncio.to_thread(self._rank, queries, snapshot, vectors, top_k, warnings)
+
+    async def expand_context(
+        self, selected: list[RetrievedChunk], document_ids: list[str]
+    ) -> list[RetrievedChunk]:
+        """Merge one overlapping neighbor on the same physical page, up to 2600 chars.
+
+        Index vectors remain child vectors; only Reader context expands. Exact offsets survive.
+        Legacy chunks and unrecognized headings also work; gaps are never fabricated.
+        """
+        snapshot = await self._snapshot(document_ids, False)
+        by_page: dict[tuple[str, int | None], list[IndexedChunk]] = defaultdict(list)
+        for indexed in snapshot.chunks:
+            by_page[(indexed.document_id, indexed.page)].append(indexed)
+        expanded = []
+        for chunk in selected:
+            start, end, text = chunk.start, chunk.end, chunk.text
+            neighbors = sorted(
+                by_page[(chunk.document_id, chunk.page)],
+                key=lambda c: abs(c.ordinal - chunk.ordinal),
+            )
+            for neighbor in neighbors:
+                if neighbor.id == chunk.id or abs(neighbor.ordinal - chunk.ordinal) != 1:
+                    continue
+                if neighbor.section != chunk.section:
+                    continue
+                left, right = max(start, neighbor.start), min(end, neighbor.end)
+                if left > right or max(end, neighbor.end) - min(start, neighbor.start) > 2600:
+                    continue
+                if (
+                    text[left - start : right - start]
+                    != neighbor.text[left - neighbor.start : right - neighbor.start]
+                ):
+                    continue
+                if neighbor.start < start:
+                    text = neighbor.text[: start - neighbor.start] + text
+                    start = neighbor.start
+                if neighbor.end > end:
+                    text += neighbor.text[end - neighbor.start :]
+                    end = neighbor.end
+                break
+            expanded.append(chunk.model_copy(update={"text": text, "start": start, "end": end}))
+        return expanded
 
     def _rank(
         self,

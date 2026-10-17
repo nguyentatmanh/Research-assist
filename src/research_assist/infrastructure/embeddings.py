@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,15 @@ import httpx
 from research_assist.config import Settings
 from research_assist.domain.errors import ProviderError
 from research_assist.infrastructure.local_runtime import INFERENCE_LOCK
+
+
+def embedding_identity(fingerprint: str | None) -> str | None:
+    """Match equivalent local vector formats without changing model/revision identity."""
+    if fingerprint and fingerprint.startswith("sentence-transformers:"):
+        identity, _, tag = fingerprint.rpartition(":")
+        if tag == "normalized" or re.fullmatch(r"v[0-9]+", tag):
+            return identity
+    return fingerprint
 
 
 def validate_vectors(vectors: object, count: int) -> list[list[float]]:
@@ -67,7 +77,7 @@ class LocalEmbeddings:
         self.max_seq_length = max_seq_length
         signature = checkpoint_signature(Path(model)) if Path(model).is_dir() else "remote"
         self.fingerprint: str | None = (
-            f"sentence-transformers:{model}:{family}:{revision}:{signature}:{max_seq_length}:v2"
+            f"sentence-transformers:{model}:{family}:{revision}:{signature}:{max_seq_length}:normalized"
         )
         self.model_name, self.batch_size = model, batch_size
         self._model: Any = None

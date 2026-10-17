@@ -56,6 +56,12 @@ class SummarizerAgent:
                     ).hexdigest()[:24],
                     text=raw.text,
                     evidence_ids=list(dict.fromkeys(raw.evidence_ids)),
+                    requirement_ids=[
+                        rid
+                        for rid in raw.requirement_ids
+                        if rid in {r.id for r in (requirements or [])}
+                    ],
+                    kind=raw.kind,
                 )
             )
         warnings = (

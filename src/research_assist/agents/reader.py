@@ -4,6 +4,7 @@ from hashlib import sha256
 from research_assist.agents.prompts.reader import INSTRUCTION
 from research_assist.domain.models import Evidence, RawEvidence, ReaderOutput, RetrievedChunk
 from research_assist.domain.ports import LanguageModel
+from research_assist.domain.source_units import source_units
 from research_assist.domain.text import tokens
 
 
@@ -26,23 +27,50 @@ class ReaderAgent:
         self,
         question: str,
         chunks: list[RetrievedChunk],
+        requirements: list[str] | None = None,
     ) -> tuple[list[Evidence], list[str], list[str]]:
         if not chunks:
             return [], ["Không tìm thấy đoạn tài liệu liên quan đến câu hỏi."], []
+        units = source_units(chunks)
+        unit_lookup = {u["unit_id"]: u for u in units}
         raw = await self.llm.generate(
             task="read_evidence",
             instruction=(INSTRUCTION),
-            payload={"question": question, "chunks": [c.model_dump() for c in chunks]},
+            payload={
+                "question": question,
+                "requirements": requirements or [],
+                "source_units": units,
+                "sources": [
+                    {
+                        "chunk_id": c.id,
+                        "page": c.page,
+                        "section": c.section,
+                        "filename": c.filename,
+                        "title": c.document_title,
+                    }
+                    for c in chunks
+                ],
+            },
             schema=ReaderOutput,
             fallback=lambda: self._extract(question, chunks),
         )
         lookup = {chunk.id: chunk for chunk in chunks}
         evidence, seen, rejected = [], set(), 0
+        rejection_notes: list[str] = []
         for item in raw.evidence:
             chunk = lookup.get(item.chunk_id)
-            span = quote_span(chunk.text, item.quote) if chunk else None
+            unit = unit_lookup.get(item.unit_id) if item.unit_id else None
+            if item.unit_id:
+                span = (
+                    (int(unit["start"]), int(unit["end"]))
+                    if (unit and unit["chunk_id"] == item.chunk_id)
+                    else None
+                )
+            else:
+                span = quote_span(chunk.text, item.quote) if chunk else None
             if chunk is None or span is None:
                 rejected += 1
+                rejection_notes.append(f"{item.chunk_id}: invalid_source_unit_or_quote")
                 continue
             quote = chunk.text[span[0] : span[1]]
             if len(quote) > 1400:
@@ -59,6 +87,12 @@ class ReaderAgent:
                     chunk_id=chunk.id,
                     quote=quote,
                     relevance=item.relevance,
+                    unit_id=item.unit_id,
+                    requirement_ids=[
+                        rid
+                        for rid in item.requirement_ids
+                        if rid in {f"rq_{i + 1}" for i in range(len(requirements or []))}
+                    ],
                     document_id=chunk.document_id,
                     document_title=chunk.document_title,
                     filename=chunk.filename,
@@ -75,6 +109,7 @@ class ReaderAgent:
         )
         if any("OCR" in e.section for e in evidence):
             warnings.append("Có bằng chứng trích từ OCR; hãy đối chiếu số liệu với ảnh trang gốc.")
+        warnings.extend(rejection_notes)
         return evidence, raw.gaps, warnings
 
     def _extract(self, question: str, chunks: list[RetrievedChunk]) -> ReaderOutput:

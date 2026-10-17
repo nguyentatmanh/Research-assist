@@ -29,6 +29,7 @@ class FactCheckerAgent:
         claims: list[Claim],
         evidence: list[Evidence],
         requirements: list[Requirement],
+        gaps: list[str] | None = None,
     ) -> FactCheckOutput:
         if not claims:
             return FactCheckOutput(coverage=validate_coverage(requirements, [], []))
@@ -37,6 +38,7 @@ class FactCheckerAgent:
             instruction=INSTRUCTION,
             payload={
                 "question": question,
+                "candidate_gaps": list(enumerate(gaps or [])),
                 "claims": [c.model_dump() for c in claims],
                 "evidence": [e.model_dump() for e in evidence],
                 "requirements": [r.model_dump() for r in requirements],
@@ -45,8 +47,19 @@ class FactCheckerAgent:
             fallback=lambda: self._extractive_checks(claims, evidence),
         )
         checks = validate_checks(claims, evidence, output.checks)
+        coverage = validate_coverage(requirements, output.coverage, checks)
+        if len(requirements) > 1:
+            by_id = {c.id: c for c in claims}
+            for row in coverage:
+                if row.status in {"covered", "partial"} and any(
+                    row.requirement_id not in by_id[cid].requirement_ids for cid in row.claim_ids
+                ):
+                    row.status = "unassessed"
+                    row.explanation = "Nhận định chưa được gắn với đúng ý cần trả lời."
         return FactCheckOutput(
-            checks=checks, coverage=validate_coverage(requirements, output.coverage, checks)
+            checks=checks,
+            coverage=coverage,
+            gap_checks=output.gap_checks,
         )
 
     def _extractive_checks(self, claims: list[Claim], evidence: list[Evidence]) -> FactCheckOutput:

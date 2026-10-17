@@ -1,6 +1,14 @@
 """Coverage refers to question requirements; a model judgement is not human gold."""
 
-from research_assist.domain.models import ClaimCheck, CoverageCheck, Requirement, ResearchRequest
+from research_assist.domain.models import (
+    ClaimCheck,
+    CoverageCheck,
+    Evidence,
+    EvidenceGap,
+    GapCheck,
+    Requirement,
+    ResearchRequest,
+)
 
 
 def requirements_for(request: ResearchRequest) -> list[Requirement]:
@@ -58,3 +66,79 @@ def report_coverage(coverage: list[CoverageCheck], written_ids: list[str]) -> li
         else:
             result.append(row)
     return result
+
+
+def reconcile_gaps(
+    requirements: list[Requirement],
+    coverage: list[CoverageCheck],
+    raw_gaps: list[str],
+    gap_checks: list[GapCheck],
+    evidence: list[Evidence],
+) -> tuple[list[CoverageCheck], list[EvidenceGap]]:
+    """Unvalidated free text never becomes a factual absence claim in a report.
+
+    Missing/duplicate gap reviews fail closed. A resolved review must point to real evidence.
+    An unassigned unresolved gap conservatively invalidates covered assessments.
+    """
+    evidence_ids = {e.id for e in evidence}
+    valid_ids = {r.id for r in requirements}
+    blocked = set()
+    for index, _ in enumerate(raw_gaps):
+        rows = [g for g in gap_checks if g.gap_index == index]
+        if len(rows) == 1:
+            row = rows[0]
+            if (
+                row.status == "resolved"
+                and row.evidence_ids
+                and set(row.evidence_ids).issubset(evidence_ids)
+            ):
+                continue
+            related = set(row.requirement_ids) & valid_ids
+            blocked.update(related or valid_ids)
+        else:
+            blocked.update(valid_ids)
+    revised = []
+    for coverage_row in coverage:
+        if coverage_row.requirement_id in blocked and coverage_row.status == "covered":
+            coverage_row = coverage_row.model_copy(
+                update={
+                    "status": "unassessed",
+                    "explanation": (
+                        "Còn khoảng trống chưa được giải quyết trong bằng chứng truy xuất."
+                    ),
+                }
+            )
+        revised.append(coverage_row)
+    gaps = [
+        EvidenceGap(
+            requirement_id=row.requirement_id,
+            reason="coverage_unassessed" if row.status == "unassessed" else "no_supported_evidence",
+        )
+        for row in revised
+        if row.status != "covered"
+    ]
+    return revised, gaps
+
+
+def gap_messages(
+    gaps: list[EvidenceGap],
+    requirements: list[Requirement],
+    language: str,
+) -> list[str]:
+    lookup = {r.id: r.text for r in requirements}
+    messages = []
+    for gap in gaps:
+        if gap.reason == "coverage_unassessed":
+            prefix = (
+                "Coverage has not been established for: "
+                if language == "en"
+                else "Chưa xác nhận được mức đáp ứng cho: "
+            )
+        else:
+            prefix = (
+                "The checked retrieved evidence does not yet fully answer: "
+                if language == "en"
+                else "Bằng chứng đã truy xuất và kiểm tra chưa trả lời đầy đủ: "
+            )
+        messages.append(prefix + lookup.get(gap.requirement_id or "", "unassessed aspect"))
+    return messages

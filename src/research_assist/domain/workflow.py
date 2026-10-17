@@ -27,7 +27,7 @@ def decide_next(
         return Decision(False, "no_new_evidence")
     supported = any(c.verdict == "supported" for c in checks)
     unresolved = bool(gaps) or any(c.verdict != "supported" for c in checks)
-    unresolved |= any(c.status in {"missing", "partial"} for c in coverage)
+    unresolved |= any(c.status in {"missing", "partial", "unassessed"} for c in coverage)
     if supported and not unresolved:
         complete = bool(coverage) and all(c.status == "covered" for c in coverage)
         return Decision(False, "requirements_covered" if complete else "coverage_unassessed")

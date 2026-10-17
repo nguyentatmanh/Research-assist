@@ -173,6 +173,20 @@ class Repository:
                 [(c.model_dump_json(), c.id) for c in chunks],
             )
 
+    def replace_index(self, staged: list[tuple[Document, list[IndexedChunk]]]) -> None:
+        with self.connection() as db:
+            for document, chunks in staged:
+                db.execute("DELETE FROM chunks WHERE document_id=?", (document.id,))
+                db.executemany(
+                    "INSERT INTO chunks VALUES (?,?,?)",
+                    [(c.id, c.document_id, c.model_dump_json()) for c in chunks],
+                )
+                db.execute(
+                    "UPDATE documents SET metadata=? WHERE id=?",
+                    (document.model_dump_json(), document.id),
+                )
+            db.execute("DELETE FROM generation_cache")
+
     def blob(self, document_id: str) -> Path:
         with self.connection() as db:
             row = db.execute(

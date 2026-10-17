@@ -7,12 +7,19 @@ from research_assist.agents.reader import ReaderAgent
 from research_assist.agents.retrieval import RetrievalAgent
 from research_assist.agents.summarizer import SummarizerAgent
 from research_assist.agents.writer import WriterAgent, escape_markdown
-from research_assist.domain.coverage import report_coverage, requirements_for
+from research_assist.domain.coverage import (
+    gap_messages,
+    reconcile_gaps,
+    report_coverage,
+    requirements_for,
+)
+from research_assist.domain.metadata import EVIDENCE_POLICY
 from research_assist.domain.models import (
     AgentEvent,
     Claim,
     ClaimCheck,
     Evidence,
+    EvidenceGap,
     ResearchRequest,
     ResearchResult,
     RetrievedChunk,
@@ -54,6 +61,8 @@ class ResearchPipeline:
         checks: list[ClaimCheck] = []
         round_number = 1
         requirements = requirements_for(request)
+        gap_details: list[EvidenceGap] = []
+        pending_ids = None
         coverage = []
         stop_reason = "round_limit"
 
@@ -77,7 +86,12 @@ class ResearchPipeline:
             events.append(item)
             emit(item)
 
-        async def step(agent: str, message: str, work: Awaitable[T]) -> T:
+        async def step(
+            agent: str,
+            message: str,
+            work: Awaitable[T],
+            describe: Callable[[T], dict[str, object]] | None = None,
+        ) -> T:
             event(agent, "running", message)
             begin = time.perf_counter()
             usage = current_usage.get()
@@ -98,82 +112,169 @@ class ResearchPipeline:
                 entry = usage.agents[agent]
                 entry.elapsed_ms = round(previous_ms + elapsed, 2)
                 details = entry.model_dump(exclude={"agent", "elapsed_ms"})
+            if describe:
+                details.update(describe(value))
             event(agent, "completed", "Hoàn thành.", elapsed, **details)
             return value
 
         with usage_scope(request.profile or self.profile, request.use_cache) as usage:
+            event(
+                "orchestrator",
+                "running",
+                "Đã cố định phạm vi tài liệu.",
+                document_ids=request.document_ids,
+                scope_mode=request.scope_mode,
+                policy_version=EVIDENCE_POLICY,
+            )
+            question_plan = await step(
+                "retrieval",
+                "Phân tích các ý cần trả lời.",
+                self.retrieval.prepare(request),
+                lambda p: {
+                    "stage": "question_planning",
+                    "aspects": [a.model_dump() for a in p.aspects],
+                },
+            )
+            planned_request = request.model_copy(
+                update={
+                    "requirements": [a.text for a in question_plan.aspects],
+                }
+            )
+            requirements = requirements_for(planned_request)
+            pooled = []
             for round_number in range(1, request.max_rounds + 1):
                 plan, chunks, retrieval_warnings = await step(
                     "retrieval",
                     "Lập kế hoạch và truy xuất tài liệu.",
-                    self.retrieval.run(request, gaps),
+                    self.retrieval.run(request, gaps, question_plan, pending_ids),
+                    lambda v: {
+                        "queries": v[0].queries,
+                        "stage": "local_search",
+                        "execution": "local",
+                        "retrieval_lanes": v[0].trace,
+                        "facets": v[0].facets,
+                        "retrieved_count": len(v[1]),
+                        "candidates": [
+                            {
+                                "id": c.id,
+                                "document_id": c.document_id,
+                                "page": c.page,
+                                "section": c.section,
+                                "score": c.score,
+                                "lexical_score": c.lexical_score,
+                                "semantic_score": c.semantic_score,
+                                "rerank_score": c.rerank_score,
+                            }
+                            for c in v[1]
+                        ],
+                        "warnings": v[2],
+                    },
                 )
                 warnings.extend(retrieval_warnings)
-                events[-1].details.update({"queries": plan.queries, "retrieved_count": len(chunks)})
                 all_chunks.update({chunk.id: chunk for chunk in chunks})
                 evidence, reader_gaps, reader_warnings = await step(
                     "reader",
                     f"Đọc {len(chunks)} đoạn và kiểm tra trích dẫn nguyên văn.",
-                    self.reader.run(request.question, chunks),
-                )
-                events[-1].details.update(
-                    {"accepted_evidence": len(evidence), "warnings": reader_warnings}
+                    self.reader.run(request.question, chunks, planned_request.requirements),
+                    lambda v: {
+                        "accepted_evidence": len(v[0]),
+                        "evidence": [
+                            {
+                                "id": e.id,
+                                "chunk_id": e.chunk_id,
+                                "unit_id": e.unit_id,
+                                "requirement_ids": e.requirement_ids,
+                                "start": e.start,
+                                "end": e.end,
+                            }
+                            for e in v[0]
+                        ],
+                        "warnings": v[2],
+                        "candidate_gaps_unverified": v[1],
+                    },
                 )
                 previous_keys = set(all_evidence)
                 before = len(all_evidence)
                 for item in evidence:
-                    all_evidence.setdefault((item.document_id, item.page, item.quote), item)
+                    key = (item.document_id, item.page, item.quote)
+                    previous = all_evidence.get(key)
+                    all_evidence[key] = (
+                        previous.model_copy(
+                            update={
+                                "requirement_ids": list(
+                                    dict.fromkeys(
+                                        [
+                                            *previous.requirement_ids,
+                                            *item.requirement_ids,
+                                        ]
+                                    )
+                                ),
+                            }
+                        )
+                        if previous
+                        else item
+                    )
                 warnings.extend(reader_warnings)
                 # Give newly retrieved evidence a chance in round two. Taking the first
                 # 24 accumulated items forever would silently discard the follow-up search.
                 pooled = [item for key, item in all_evidence.items() if key not in previous_keys]
                 pooled += [item for key, item in all_evidence.items() if key in previous_keys]
-                pooled = pooled[:24]
-                # A second search with no new evidence cannot improve the synthesis.
-                if round_number > 1 and len(all_evidence) == before:
-                    stop_reason = "no_new_evidence"
-                    gaps = list(dict.fromkeys([*gaps, *reader_gaps]))[:8]
-                    event(
-                        "orchestrator",
-                        "completed",
-                        "Không có bằng chứng mới; kết thúc vòng truy xuất bổ sung.",
-                    )
-                    break
+                # Reserve evidence slots per aspect before filling the remaining budget.
+                reserved = []
+                for requirement in requirements:
+                    related = [e for e in pooled if requirement.id in e.requirement_ids]
+                    reserved.extend(related[:2])
+                pooled = list({e.id: e for e in [*reserved, *pooled]}.values())[:24]
+                supported_ids = {c.claim_id for c in checks if c.verdict == "supported"}
+                previous_claims = [c for c in claims if c.id in supported_ids]
                 claims, synthesis_gaps, synthesis_warnings = await step(
                     "summarizer",
                     f"Tổng hợp {len(pooled)} bằng chứng thành nhận định.",
                     self.summarizer.run(request.question, pooled, request.language, requirements),
                 )
                 warnings.extend(synthesis_warnings)
+                # Retain prior findings if their evidence is still in the bounded ledger.
+                pool_ids = {e.id for e in pooled}
+                current_texts = {c.text for c in claims}
+                current_ids = {c.id for c in claims}
+                claims.extend(
+                    c
+                    for c in previous_claims
+                    if c.text not in current_texts
+                    and c.id not in current_ids
+                    and set(c.evidence_ids).issubset(pool_ids)
+                )
+                claims = claims[:16]
+                candidate_gaps = list(dict.fromkeys([*reader_gaps, *synthesis_gaps]))[:16]
                 verification = await step(
                     "fact_checker",
                     f"Kiểm tra mức hỗ trợ của {len(claims)} nhận định.",
-                    self.checker.assess(request.question, claims, pooled, requirements),
+                    self.checker.assess(
+                        request.question, claims, pooled, requirements, candidate_gaps
+                    ),
+                    lambda v: {
+                        "checks": [c.model_dump() for c in v.checks],
+                        "coverage": [c.model_dump() for c in v.coverage],
+                        "gap_checks": [c.model_dump() for c in v.gap_checks],
+                    },
                 )
                 checks, coverage = verification.checks, verification.coverage
-                events[-1].details.update(
-                    {
-                        "supported": sum(c.verdict == "supported" for c in checks),
-                        "checked": len(checks),
-                        "coverage": [c.model_dump() for c in coverage],
-                    }
+                coverage, gap_details = reconcile_gaps(
+                    requirements,
+                    coverage,
+                    candidate_gaps,
+                    verification.gap_checks,
+                    pooled,
                 )
-                rejected = [check for check in checks if check.verdict != "supported"]
-                gaps = list(dict.fromkeys([*reader_gaps, *synthesis_gaps]))[:8]
-                if rejected:
-                    # Use rejected claim text as a bounded follow-up hint.
-                    missing = {c.id: c.text for c in claims}
-                    gaps = list(dict.fromkeys([*gaps, *[missing[c.claim_id] for c in rejected]]))[
-                        :8
-                    ]
-                unresolved_ids = {
-                    c.requirement_id for c in coverage if c.status in {"missing", "partial"}
-                }
-                gaps = list(
-                    dict.fromkeys(
-                        [*gaps, *[r.text for r in requirements if r.id in unresolved_ids]]
-                    )
-                )[:8]
+                gaps = gap_messages(gap_details, requirements, request.language)
+                pending_ids = {c.requirement_id for c in coverage if c.status != "covered"}
+                event(
+                    "orchestrator",
+                    "completed",
+                    "Đối chiếu độ đầy đủ và khoảng trống.",
+                    coverage=[c.model_dump() for c in coverage],
+                    gaps=[g.model_dump() for g in gap_details],
+                )
                 decision = decide_next(
                     round_number=round_number,
                     max_rounds=request.max_rounds,
@@ -196,7 +297,10 @@ class ResearchPipeline:
             report = await step(
                 "writer",
                 "Biên soạn báo cáo từ nhận định đã được nguồn hỗ trợ.",
-                self.writer.compose(request, claims, checks, final_evidence, gaps),
+                self.writer.compose(
+                    planned_request, claims, checks, final_evidence, gaps, gap_details
+                ),
+                lambda v: {"written_claims": len(v.claim_ids), "stop_reason": stop_reason},
             )
             warnings.extend(report.warnings)
             coverage = report_coverage(coverage, report.claim_ids)
@@ -231,9 +335,6 @@ class ResearchPipeline:
                 ),
             ]
             markdown = report.markdown + "\n".join(coverage_lines) + "\n"
-            events[-1].details.update(
-                {"written_claims": len(report.claim_ids), "stop_reason": stop_reason}
-            )
             if usage.missing_usage:
                 warnings.append(
                     "Một số phản hồi thiếu thống kê token; số token hiển thị chưa đầy đủ."
@@ -250,7 +351,9 @@ class ResearchPipeline:
                 coverage=coverage,
                 reported_claim_ids=report.claim_ids,
                 stop_reason=stop_reason,
-                policy_version="2.1",
+                policy_version=EVIDENCE_POLICY,
+                document_ids=request.document_ids,
+                gap_details=gap_details,
                 title=report.title,
                 markdown=markdown,
                 retrieved=list(all_chunks.values()),

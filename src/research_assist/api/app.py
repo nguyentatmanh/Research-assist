@@ -18,6 +18,7 @@ from research_assist.agents.catalog import public_specs
 from research_assist.bootstrap import Container, build_container
 from research_assist.config import Settings
 from research_assist.domain.errors import CapacityError, DocumentError, NotFoundError, ResearchError
+from research_assist.domain.metadata import EVIDENCE_POLICY
 from research_assist.domain.models import ResearchRequest
 
 
@@ -160,7 +161,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/agents")
     async def agent_contracts() -> dict[str, object]:
         return {
-            "policy_version": "2.1",
+            "policy_version": EVIDENCE_POLICY,
             "agents": public_specs(),
             "orchestrator": {"max_rounds": 2, "pattern": "bounded evidence feedback"},
         }
@@ -199,7 +200,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "failure_policy": settings.reranker_failure_policy,
             },
             "pdf_ocr_enabled": settings.pdf_ocr_enabled,
-            "policy_version": "2.1",
+            "policy_version": EVIDENCE_POLICY,
         }
 
     @app.get("/api/documents")
@@ -226,7 +227,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/documents/reindex")
     async def reindex(request: Request) -> dict[str, object]:
-        return {"chunks_updated": await deps(request).documents.reindex()}
+        container = deps(request)
+        if container.runs.busy:
+            raise ResearchError("Dừng các phiên nghiên cứu trước khi tạo lại vector.")
+        return {"chunks_updated": await container.documents.reindex()}
+
+    @app.post("/api/documents/rebuild")
+    async def rebuild(request: Request) -> dict[str, object]:
+        container = deps(request)
+        if container.runs.busy:
+            raise ResearchError("Dừng các phiên nghiên cứu trước khi xây dựng lại chỉ mục.")
+        return {"chunks_updated": await container.documents.rebuild()}
 
     @app.get("/api/documents/{document_id}/chunks")
     async def chunks(document_id: str, request: Request) -> dict[str, object]:
@@ -259,9 +270,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.delete("/api/documents/{document_id}", status_code=204)
     async def remove(document_id: str, request: Request) -> Response:
         container = deps(request)
-        if container.runs.busy:
+        if container.runs.busy or container.documents.lock.locked():
             return JSONResponse(
-                {"detail": "Hãy chờ hoặc dừng các phiên đang chạy trước khi xóa tài liệu."},
+                {"detail": "Hãy chờ tác vụ tài liệu hoặc dừng phiên nghiên cứu trước khi xóa."},
                 status_code=409,
             )
         await container.documents.delete(document_id)
@@ -269,7 +280,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/runs", status_code=202)
     async def create_run(body: ResearchRequest, request: Request) -> dict[str, object]:
-        return deps(request).runs.submit(body).model_dump()
+        container = deps(request)
+        if container.documents.maintenance:
+            raise ResearchError("Đang xây dựng lại chỉ mục; hãy chờ hoàn thành.")
+        return container.runs.submit(body).model_dump()
 
     @app.get("/api/runs")
     async def history(request: Request) -> dict[str, object]:
@@ -278,6 +292,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/runs/{run_id}")
     async def get_run(run_id: str, request: Request) -> dict[str, object]:
         return deps(request).repository.run(run_id).model_dump()
+
+    @app.get("/api/runs/{run_id}/trace")
+    async def trace(run_id: str, request: Request) -> Response:
+        record = deps(request).repository.run(run_id)
+        return Response(
+            json.dumps(
+                {
+                    "format_version": 1,
+                    "run_id": record.id,
+                    "status": record.status,
+                    "document_ids": record.request.document_ids,
+                    "scope_documents": [d.model_dump() for d in record.scope_documents],
+                    "corpus_revision": record.corpus_revision,
+                    "events": [e.model_dump() for e in record.events],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{record.id}-trace.json"'},
+        )
 
     @app.post("/api/runs/{run_id}/cancel")
     async def cancel(run_id: str, request: Request) -> dict[str, object]:

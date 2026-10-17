@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from research_assist.application.pipeline import ResearchPipeline
 from research_assist.config import Settings
-from research_assist.domain.errors import CapacityError, ResearchError
+from research_assist.domain.errors import CapacityError, NotFoundError, ResearchError
 from research_assist.domain.models import AgentEvent, ResearchRequest, RunRecord
 from research_assist.infrastructure.repository import Repository, now
 
@@ -29,13 +29,27 @@ class RunManager:
         # No await between capacity check and task registration: atomic on this loop.
         if len(self.tasks) >= self.settings.max_pending_runs:
             raise CapacityError("Hàng đợi đang đầy. Hãy chờ một phiên nghiên cứu hoàn thành.")
-        if not self.repository.documents():
+        documents = self.repository.documents()
+        if not documents:
             raise ResearchError("Hãy tải tài liệu hoặc nạp bộ dữ liệu mẫu trước khi nghiên cứu.")
-        for document_id in request.document_ids:
-            self.repository.document(document_id)
+        available = {document.id: document for document in documents}
+        try:
+            scope_documents = (
+                [available[document_id] for document_id in request.document_ids]
+                if request.document_ids
+                else documents
+            )
+        except KeyError:
+            raise NotFoundError("Không tìm thấy tài liệu.") from None
+        # Resolve all documents once. Later uploads never alter an in-flight scope.
+        request = ResearchRequest.model_validate(
+            {**request.model_dump(), "document_ids": [d.id for d in scope_documents]}
+        )
         run = RunRecord(
             id=f"run_{uuid4().hex}",
             status="queued",
+            scope_documents=scope_documents,
+            corpus_revision=self.repository.corpus_revision(),
             request=request,
             created_at=now(),
             updated_at=now(),

@@ -149,6 +149,9 @@ def extract(data: bytes, filename: str, settings: Settings) -> list[SourceSectio
 def chunk_sections(
     sections: list[SourceSection], document: Document, settings: Settings
 ) -> list[Chunk]:
+    from research_assist.infrastructure.sections import split_headings
+
+    sections = split_headings(sections)
     if settings.chunk_strategy == "tokens":
         from research_assist.infrastructure.token_chunker import token_chunks
 
@@ -168,7 +171,7 @@ def chunk_sections(
             left_trim = len(raw) - len(raw.lstrip())
             text = raw.strip()
             if len(text) >= 20:
-                offset = start + left_trim
+                offset = section.offset + start + left_trim
                 chunks.append(
                     Chunk(
                         id=f"ch_{uuid4().hex}",
