@@ -34,18 +34,48 @@ try {
     fullPage: true,
   });
   checks++;
+  await page.click('[data-view="activity"]');
+  await page.click("#architecture-button");
+  await page.waitForSelector(".architecture-card");
+  assert.equal(await page.locator(".architecture-card").count(), 5);
+  await page.screenshot({
+    path: `${output}/architecture-desktop.png`,
+    fullPage: true,
+  });
+  await page.locator("#architecture-dialog .close-dialog").click();
+  checks++;
+  await page.click('[data-view="research"]');
   await page.click("#seed-button");
   await page.waitForFunction(
     () => document.querySelector("#nav-doc-count").textContent === "3",
   );
   checks++;
-  await page.click(".prompt-chip");
+  await page.fill(
+    "#question",
+    "RAG và Self-RAG khác nhau như thế nào về truy xuất và kiểm tra câu trả lời?",
+  );
+  await page.locator(".requirement-options summary").click();
+  await page.fill(
+    "#requirements",
+    "Giải thích truy xuất\nGiải thích kiểm chứng",
+  );
   await page.click("#run-button");
-  await page.waitForSelector("#results-section:not([hidden])");
+  await page.waitForFunction(
+    () => !document.querySelector("#results-section").hidden,
+  );
+  await page.click("#back-research");
   assert.ok(
     (await page.locator("#report-content").textContent()).includes("RAG"),
   );
   assert.equal(await page.locator(".agent-node.completed").count(), 5);
+  assert.equal(await page.locator("#coverage-panel").isVisible(), true);
+  assert.equal(await page.locator(".coverage-item").count(), 2);
+  assert.ok(
+    (await page.locator("#coverage-panel").textContent()).includes(
+      "Chưa xác định",
+    ),
+  );
+  checks++;
   assert.ok((await page.locator(".citation-button").count()) > 0);
   assert.ok(
     (await page.locator("#usage-panel").textContent()).includes("cache hit"),
@@ -65,8 +95,8 @@ try {
   checks++;
   await page.click('[data-tab="checks"]');
   assert.ok((await page.locator(".check-status.supported").count()) > 0);
-  await page.click('[data-tab="trace"]');
-  assert.equal(await page.locator(".trace-item").count(), 10);
+  await page.click('[data-view="activity"]');
+  assert.ok((await page.locator(".trace-item").count()) >= 14);
   checks++;
   await page.click('[data-view="history"]');
   await page.waitForSelector(".history-item");
@@ -92,17 +122,21 @@ try {
   checks++;
   // Select only the uploaded document and verify source scope in the visible report.
   await page.click('[data-view="research"]');
+  await page.click("#choose-sources");
+  await page.click("#scope-clear");
   await page
-    .locator(".sidebar-document")
-    .filter({ hasText: "safe-display.txt" })
-    .locator("input")
+    .getByRole("checkbox", { name: "Chọn nguồn safe-display.txt", exact: true })
     .check();
+  await page.locator("#scope-dialog .primary-button").click();
   await page.fill(
     "#question",
     "Explain the RAG evidence in this research document.",
   );
   await page.click("#run-button");
-  await page.waitForSelector("#results-section:not([hidden])");
+  await page.waitForFunction(
+    () => !document.querySelector("#results-section").hidden,
+  );
+  await page.click("#back-research");
   assert.ok(
     (await page.locator("#report-content").textContent()).includes(
       "displayed safely",
@@ -167,13 +201,11 @@ try {
       },
     ],
   };
-  await page
-    .locator("#benchmark-input")
-    .setInputFiles({
-      name: "test.json",
-      mimeType: "application/json",
-      buffer: Buffer.from(JSON.stringify(benchmark)),
-    });
+  await page.locator("#benchmark-input").setInputFiles({
+    name: "test.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(benchmark)),
+  });
   await page.waitForSelector(".benchmark-table");
   assert.ok(
     (await page.locator("#benchmark-results").textContent()).includes("0.500"),

@@ -20,7 +20,9 @@ export function renderRoutes(routes) {
         "small",
         `execution-badge ${route.execution}`,
         route.execution === "local"
-          ? "Local"
+          ? route.planner_execution === "api"
+            ? "Local + API lập kế hoạch"
+            : "Local"
           : route.execution === "demo"
             ? "Demo"
             : route.provider,
@@ -112,9 +114,7 @@ export function renderBenchmark(data) {
     !data.variants.length ||
     data.variants.length > 30
   )
-    throw new Error(
-      "Chọn JSON được tạo bởi evaluate_retrieval.py phiên bản 2.",
-    );
+    throw new Error("Chọn JSON benchmark được tạo bởi evaluate_retrieval.py.");
   number(data.eligible_queries, 1);
   number(data.corpus_size, 1);
   const rows = data.variants.map((v) => ({
