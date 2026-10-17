@@ -6,14 +6,13 @@ from pathlib import Path
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", "--output-dir", type=Path, default=Path("data/datasets/qasper"))
-    parser.add_argument("--revision", default="")
-    args = parser.parse_args()
-
     from datasets import load_dataset
     from huggingface_hub import HfApi, hf_hub_download
 
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=Path("data/datasets/qasper"))
+    parser.add_argument("--revision", default="")
+    args = parser.parse_args()
     # The original repo contains a legacy loading script, unsupported by datasets >= 4.
     # Use the official Hub parquet conversion, pinned to its commit, without remote code.
     revision = (
