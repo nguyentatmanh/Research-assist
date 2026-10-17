@@ -211,6 +211,7 @@ export function renderResult(result) {
   $("#checks-count").textContent = String(result.checks.length);
   renderMarkdown(result.markdown);
   renderChecks(result);
+  renderCoverage(result);
   renderEvidence(result.evidence);
   renderEvents(result.events, "completed");
   selectTab("report");
@@ -347,5 +348,50 @@ export async function copyReport() {
       "Trình duyệt chưa cho phép clipboard. Bạn có thể tải bản Markdown.",
       true,
     );
+  }
+}
+
+function renderCoverage(result) {
+  const panel = $("#coverage-panel");
+  panel.replaceChildren();
+  panel.hidden = !(result.coverage || []).length;
+  if (panel.hidden) return;
+  panel.append(el("h3", "", "Câu hỏi đã được đáp ứng đến đâu?"));
+  panel.append(
+    el(
+      "p",
+      "coverage-note",
+      "Đánh giá của model về độ đầy đủ; bạn có thể đối chiếu từng nhận định với nguồn.",
+    ),
+  );
+  const requirements = new Map(
+    (result.requirements || []).map((r) => [r.id, r.text]),
+  );
+  const labels = {
+    covered: "Đủ ý theo model",
+    partial: "Một phần",
+    missing: "Thiếu bằng chứng",
+    unassessed: "Chưa xác định",
+  };
+  for (const row of result.coverage) {
+    const item = el("div", "coverage-item");
+    item.append(
+      el(
+        "span",
+        `coverage-status ${row.status}`,
+        labels[row.status] || "Chưa xác định",
+      ),
+    );
+    const content = el("div");
+    content.append(
+      el(
+        "strong",
+        "",
+        requirements.get(row.requirement_id) || row.requirement_id,
+      ),
+      el("p", "", row.explanation),
+    );
+    item.append(content);
+    panel.append(item);
   }
 }

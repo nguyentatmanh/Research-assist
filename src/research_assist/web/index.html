@@ -219,6 +219,21 @@
                 maxlength="2000"
                 placeholder="Ví dụ: RAG và Self-RAG khác nhau như thế nào về truy xuất và kiểm tra câu trả lời?"
               ></textarea>
+              <details class="requirement-options">
+                <summary>Các ý cần trả lời <span>tùy chọn</span></summary>
+                <label for="requirements"
+                  >Mỗi dòng một yêu cầu, tối đa 6 dòng. Để trống để đánh giá
+                  toàn bộ câu hỏi.</label
+                >
+                <textarea
+                  id="requirements"
+                  rows="3"
+                  maxlength="3006"
+                  placeholder="Phương pháp truy xuất
+Cách kiểm tra bằng chứng
+Hạn chế được tác giả nêu"
+                ></textarea>
+              </details>
               <div class="question-tools">
                 <div class="question-scope">
                   <svg><use href="#i-stack" /></svg
@@ -306,6 +321,13 @@
                     >5 vai trò rõ ràng. Một luồng bằng chứng xuyên suốt.</span
                   >
                 </div>
+                <button
+                  type="button"
+                  id="architecture-button"
+                  class="text-button"
+                >
+                  Cách các agent phối hợp
+                </button>
                 <span class="subtle-badge" id="pipeline-status">SẴN SÀNG</span>
               </div>
               <div class="agent-pipeline" id="agent-pipeline">
@@ -390,6 +412,12 @@
                 </div>
               </div>
               <div class="metrics-row" id="metrics-row"></div>
+              <div
+                id="coverage-panel"
+                class="coverage-panel"
+                aria-live="polite"
+                hidden
+              ></div>
               <div id="result-warnings" class="result-warnings"></div>
               <div class="result-layout">
                 <article class="report-card">
@@ -626,6 +654,22 @@ RA_EMBEDDING_MODEL=intfloat/multilingual-e5-small</pre>
       ><button id="logout-button" class="text-button" hidden>
         Đăng xuất workspace
       </button>
+    </dialog>
+    <dialog id="architecture-dialog">
+      <div class="dialog-heading">
+        <div>
+          <span class="eyebrow">FIVE AGENTS · V2.1</span>
+          <h2>Luồng nghiên cứu có kiểm chứng</h2>
+        </div>
+        <button class="icon-button close-dialog" aria-label="Đóng">
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <p class="dialog-note">
+        Orchestrator điều phối tối đa hai vòng. Thiếu bằng chứng thì truy xuất
+        bổ sung; Writer chỉ nhận nội dung đã kiểm tra.
+      </p>
+      <div id="architecture-content"></div>
     </dialog>
     <dialog id="source-dialog">
       <div class="dialog-heading">

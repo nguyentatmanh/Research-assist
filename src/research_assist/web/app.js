@@ -205,6 +205,14 @@ async function startResearch() {
     toast("Hãy chờ tài liệu được lập chỉ mục.");
     return;
   }
+  const requirements = $("#requirements")
+    .value.split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (requirements.length > 6 || requirements.some((s) => s.length > 500)) {
+    toast("Tối đa 6 yêu cầu, mỗi yêu cầu tối đa 500 ký tự.", true);
+    return;
+  }
   setWorking(true);
   $("#results-section").hidden = true;
   $("#empty-state").hidden = true;
@@ -214,6 +222,10 @@ async function startResearch() {
       method: "POST",
       body: {
         question,
+        requirements: $("#requirements")
+          .value.split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean),
         document_ids: [...state.selected],
         language: $("#language").value,
         style: $("#report-style").value,
@@ -279,6 +291,7 @@ async function openRun(runId) {
   switchView("research");
   state.runId = runId;
   $("#question").value = record.request.question;
+  $("#requirements").value = (record.request.requirements || []).join("\n");
   $("#question-count").textContent = `${record.request.question.length} / 2000`;
   $("#language").value = record.request.language;
   $("#report-style").value = record.request.style;
@@ -338,6 +351,8 @@ async function uploadFiles(files) {
       form.append("file", file);
       try {
         const result = await api("/documents", { method: "POST", body: form });
+        if (result.document.warnings?.length)
+          toast(result.document.warnings[0], true);
         toast(
           result.duplicate
             ? `${file.name}: đã có trong kho.`
@@ -608,3 +623,26 @@ $("#logout-button").addEventListener("click", async () => {
   }
 });
 initialize();
+
+$("#architecture-button").addEventListener("click", async () => {
+  const root = $("#architecture-content");
+  root.replaceChildren(el("p", "loading-label", "Đang tải luồng agent…"));
+  $("#architecture-dialog").showModal();
+  try {
+    const data = await api("/agents");
+    root.replaceChildren();
+    data.agents.forEach((agent, index) => {
+      const card = el("article", "architecture-card");
+      card.append(
+        el("small", "", `0${index + 1} · ${agent.role}`),
+        el("h3", "", agent.purpose),
+      );
+      const list = el("ol");
+      agent.stages.forEach((stage) => list.append(el("li", "", stage)));
+      card.append(list, el("p", "", agent.guard));
+      root.append(card);
+    });
+  } catch (error) {
+    root.replaceChildren(el("p", "", error.message));
+  }
+});

@@ -92,6 +92,7 @@ select:focus-visible {
   flex-direction: column;
   padding: 29px 20px 16px;
   z-index: 30;
+  overflow-y: auto;
 }
 .brand {
   display: flex;
@@ -249,8 +250,10 @@ select:focus-visible {
   padding: 2px 8px 13px;
 }
 .sidebar-documents {
-  overflow: auto;
-  max-height: 32vh;
+  overflow-y: auto;
+  max-height: 35vh;
+  min-height: 80px;
+  flex-shrink: 0;
 }
 .sidebar-document {
   display: flex;
@@ -2253,5 +2256,139 @@ h1,
   .execution-badge {
     grid-column: 2;
     justify-self: start;
+  }
+}
+
+/* v2.1 question coverage and explainable agent workflow */
+.requirement-options {
+  margin: 0 0 18px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border, #e3e7e5);
+}
+.requirement-options summary {
+  cursor: pointer;
+  color: #45564f;
+  font-size: 0.85rem;
+  padding: 10px 0;
+}
+.requirement-options summary span {
+  color: #78847f;
+  margin-left: 8px;
+  font-size: 0.75rem;
+}
+.requirement-options label {
+  display: block;
+  font-size: 0.78rem;
+  color: #62726a;
+  margin: 6px 0;
+}
+.requirement-options textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 85px;
+  border: 1px solid #d9e1dc;
+  border-radius: 10px;
+  padding: 12px;
+  font: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+.coverage-panel {
+  margin: 16px 0;
+  padding: 20px;
+  background: #f5f8f5;
+  border: 1px solid #dce5dc;
+  border-radius: 14px;
+}
+.coverage-panel h3 {
+  font-size: 0.95rem;
+  margin: 0 0 6px;
+}
+.coverage-note {
+  color: #65736a;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  margin: 0 0 12px;
+}
+.coverage-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid #e0e6df;
+}
+.coverage-item strong {
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+.coverage-item p {
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: #65736a;
+  margin: 5px 0 0;
+}
+.coverage-status {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  padding: 5px 8px;
+  background: #e9ede9;
+  color: #53635a;
+  border-radius: 6px;
+}
+.coverage-status.covered {
+  background: #d8ecd9;
+  color: #2d5936;
+}
+.coverage-status.partial,
+.coverage-status.missing {
+  background: #faebd8;
+  color: #805b28;
+}
+#architecture-dialog {
+  width: min(780px, calc(100vw - 32px));
+}
+#architecture-content {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.architecture-card {
+  padding: 18px;
+  border: 1px solid #dce5dc;
+  border-radius: 12px;
+  background: #f8faf7;
+}
+.architecture-card small {
+  color: #677960;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.architecture-card h3 {
+  margin: 8px 0;
+  font-size: 0.95rem;
+}
+.architecture-card ol {
+  margin: 10px 0;
+  padding-left: 20px;
+  font-size: 0.8rem;
+  line-height: 1.8;
+}
+.architecture-card p {
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: #617261;
+  margin: 0;
+}
+@media (max-width: 650px) {
+  .coverage-item {
+    flex-direction: column;
+    gap: 6px;
+  }
+  #architecture-content {
+    grid-template-columns: 1fr;
+  }
+  .pipeline-panel .section-heading {
+    flex-wrap: wrap;
+    gap: 10px;
   }
 }

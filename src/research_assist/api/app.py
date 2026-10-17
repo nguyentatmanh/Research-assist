@@ -14,6 +14,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from research_assist import __version__
+from research_assist.agents.catalog import public_specs
 from research_assist.bootstrap import Container, build_container
 from research_assist.config import Settings
 from research_assist.domain.errors import CapacityError, DocumentError, NotFoundError, ResearchError
@@ -156,6 +157,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "local_device": settings.local_device,
         }
 
+    @app.get("/api/agents")
+    async def agent_contracts() -> dict[str, object]:
+        return {
+            "policy_version": "2.1",
+            "agents": public_specs(),
+            "orchestrator": {"max_rounds": 2, "pattern": "bounded evidence feedback"},
+        }
+
     @app.post("/api/cache/clear")
     async def clear_cache(request: Request) -> dict[str, int]:
         return {"deleted": deps(request).repository.clear_cache()}
@@ -182,6 +191,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "requests_per_minute": settings.llm_requests_per_minute,
             },
             "active_runs": len(container.runs.tasks),
+            "search_cache": container.search.diagnostics(),
+            "reranker": {
+                "batch_size": settings.reranker_batch_size,
+                "max_length": settings.reranker_max_length,
+                "device": settings.reranker_device,
+                "failure_policy": settings.reranker_failure_policy,
+            },
+            "pdf_ocr_enabled": settings.pdf_ocr_enabled,
+            "policy_version": "2.1",
         }
 
     @app.get("/api/documents")
