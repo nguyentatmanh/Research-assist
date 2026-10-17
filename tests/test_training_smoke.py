@@ -18,8 +18,8 @@ async def test_real_cpu_training_and_checkpoint_reload(tmp_path: Path) -> None:
     from transformers import BertConfig, BertModel, BertTokenizerFast
 
     torch.set_num_threads(2)
-    base = tmp_path / "random-base"
-    base.mkdir()
+    transformer_path = tmp_path / "random-transformer"
+    transformer_path.mkdir()
     vocabulary = [
         "[PAD]",
         "[UNK]",
@@ -46,9 +46,9 @@ async def test_real_cpu_training_and_checkpoint_reload(tmp_path: Path) -> None:
         "2",
         "3",
     ]
-    (base / "vocab.txt").write_text("\n".join(vocabulary))
-    tokenizer = BertTokenizerFast(vocab_file=str(base / "vocab.txt"))
-    tokenizer.save_pretrained(base)
+    (transformer_path / "vocab.txt").write_text("\n".join(vocabulary))
+    tokenizer = BertTokenizerFast(vocab_file=str(transformer_path / "vocab.txt"))
+    tokenizer.save_pretrained(transformer_path)
     BertModel(
         BertConfig(
             vocab_size=len(vocabulary),
@@ -58,9 +58,11 @@ async def test_real_cpu_training_and_checkpoint_reload(tmp_path: Path) -> None:
             intermediate_size=32,
             max_position_embeddings=128,
         )
-    ).save_pretrained(base)
-    transformer = models.Transformer(str(base), max_seq_length=64)
+    ).save_pretrained(transformer_path)
+    transformer = models.Transformer(str(transformer_path), max_seq_length=64)
     model = SentenceTransformer(modules=[transformer, models.Pooling(24)], device="cpu")
+    # Windows cannot overwrite the source safetensors file while its weights are memory-mapped.
+    base = tmp_path / "random-base"
     model.save_pretrained(base)
     initial = [p.detach().clone() for p in model.parameters()]
     before = checkpoint_signature(base)
