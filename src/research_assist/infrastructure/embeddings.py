@@ -9,6 +9,7 @@ import httpx
 
 from research_assist.config import Settings
 from research_assist.domain.errors import ProviderError
+from research_assist.infrastructure.local_runtime import INFERENCE_LOCK
 
 
 def validate_vectors(vectors: object, count: int) -> list[list[float]]:
@@ -79,6 +80,10 @@ class LocalEmbeddings:
             return await asyncio.to_thread(self._encode, texts, query)
 
     def _encode(self, texts: list[str], query: bool) -> list[list[float]]:
+        with INFERENCE_LOCK:
+            return self._encode_locked(texts, query)
+
+    def _encode_locked(self, texts: list[str], query: bool) -> list[list[float]]:
         try:
             if self._model is None:
                 from sentence_transformers import SentenceTransformer

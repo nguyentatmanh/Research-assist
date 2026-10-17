@@ -24,7 +24,7 @@ class Repository:
         self.blobs.mkdir(exist_ok=True)
         with self.connection() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2):
+            if version not in (0, 1, 2, 3):
                 raise RuntimeError("Unsupported database version; back up data before upgrading")
             db.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -45,7 +45,20 @@ class Repository:
                 CREATE TABLE IF NOT EXISTS generation_cache (
                     key TEXT PRIMARY KEY, payload TEXT NOT NULL, expires REAL NOT NULL
                 );
-                PRAGMA user_version=2;
+                CREATE TABLE IF NOT EXISTS retrieval_revision (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1), revision INTEGER NOT NULL
+                );
+                INSERT OR IGNORE INTO retrieval_revision VALUES (1, 0);
+                CREATE TRIGGER IF NOT EXISTS retrieval_on_insert AFTER INSERT ON chunks BEGIN
+                    UPDATE retrieval_revision SET revision=revision+1 WHERE singleton=1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS retrieval_on_update AFTER UPDATE ON chunks BEGIN
+                    UPDATE retrieval_revision SET revision=revision+1 WHERE singleton=1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS retrieval_on_delete AFTER DELETE ON chunks BEGIN
+                    UPDATE retrieval_revision SET revision=revision+1 WHERE singleton=1;
+                END;
+                PRAGMA user_version=3;
             """)
 
     def cache_get(self, key: str) -> str | None:
@@ -125,6 +138,29 @@ class Repository:
         with self.connection() as db:
             rows = db.execute(sql, args).fetchall()
         return [IndexedChunk.model_validate_json(row["payload"]) for row in rows]
+
+    def corpus_revision(self) -> int:
+        with self.connection() as db:
+            return int(
+                db.execute("SELECT revision FROM retrieval_revision WHERE singleton=1").fetchone()[
+                    0
+                ]
+            )
+
+    def retrieval_snapshot(self, document_ids: list[str]) -> tuple[int, list[IndexedChunk]]:
+        # Revision and rows come from ONE SQLite read transaction, including other writers.
+        with self.connection() as db:
+            db.execute("BEGIN")
+            revision = int(
+                db.execute("SELECT revision FROM retrieval_revision WHERE singleton=1").fetchone()[
+                    0
+                ]
+            )
+            sql = "SELECT payload FROM chunks"
+            if document_ids:
+                sql += " WHERE document_id IN (" + ",".join("?" for _ in document_ids) + ")"
+            rows = db.execute(sql + " ORDER BY rowid", document_ids).fetchall()
+        return revision, [IndexedChunk.model_validate_json(row["payload"]) for row in rows]
 
     def chunk_count(self) -> int:
         with self.connection() as db:

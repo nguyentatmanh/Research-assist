@@ -123,7 +123,7 @@ class ModelRouter:
             cache_key = hashlib.sha256(
                 json.dumps(
                     {
-                        "version": 2,
+                        "version": "2.1",
                         "task": task,
                         "provider": model.name,
                         "model": model.model,

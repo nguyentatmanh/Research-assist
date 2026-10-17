@@ -38,6 +38,7 @@ class DocumentService:
                 page_count=len(sections) if Path(filename).suffix.lower() == ".pdf" else 0,
                 chunk_count=0,
                 created_at=now(),
+                warnings=[message for section in sections for message in section.warnings],
             )
             chunks = await asyncio.to_thread(chunk_sections, sections, document, self.settings)
             if not chunks:

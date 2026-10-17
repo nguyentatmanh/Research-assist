@@ -5,7 +5,7 @@ import re
 import unicodedata
 import zipfile
 from pathlib import PurePath
-from typing import Any, cast
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 from research_assist.config import Settings
@@ -48,13 +48,65 @@ def extract(data: bytes, filename: str, settings: Settings) -> list[SourceSectio
                 if len(pdf) > settings.max_pages:
                     raise DocumentError(f"PDF vượt quá {settings.max_pages} trang.")
                 total = 0
+                ocr_pages = 0
                 for index, page in enumerate(pdf):
                     text = normalize_text(page.get_text("text", sort=True))
+                    extraction: Literal["text", "ocr"] = "text"
+                    warnings: list[str] = []
+                    if len(text) < 40 and page.get_images():
+                        if settings.pdf_ocr_enabled:
+                            ocr_pages += 1
+                            if ocr_pages > settings.pdf_ocr_max_pages:
+                                raise DocumentError(
+                                    "PDF vượt số trang OCR cho phép. Hãy chia nhỏ tài liệu."
+                                )
+                            pixels = (
+                                page.rect.width
+                                * page.rect.height
+                                * (settings.pdf_ocr_dpi / 72) ** 2
+                            )
+                            if pixels > 20_000_000:
+                                raise DocumentError(
+                                    "Trang OCR quá lớn. Giảm RA_PDF_OCR_DPI hoặc chia trang."
+                                )
+                            try:
+                                textpage = page.get_textpage_ocr(
+                                    language=settings.pdf_ocr_language,
+                                    dpi=settings.pdf_ocr_dpi,
+                                    full=True,
+                                )
+                                text = normalize_text(
+                                    page.get_text("text", textpage=textpage, sort=True)
+                                )
+                                extraction = "ocr"
+                                warnings.append(
+                                    f"Trang {index + 1}: văn bản OCR cần đối chiếu ảnh gốc, "
+                                    "nhất là số liệu."
+                                )
+                            except Exception as exc:
+                                raise DocumentError(
+                                    "Không chạy được OCR. Kiểm tra Tesseract/tessdata "
+                                    "và RA_PDF_OCR_LANGUAGE."
+                                ) from exc
+                        else:
+                            warnings.append(
+                                f"Trang {index + 1}: ít văn bản và có ảnh; có thể cần OCR."
+                            )
+                    elif len(text) < 40:
+                        warnings.append(
+                            f"Trang {index + 1}: ít hoặc không có văn bản để lập chỉ mục."
+                        )
                     total += len(text)
                     if total > settings.max_document_chars:
                         raise DocumentError("Tài liệu vượt giới hạn văn bản cho một lần tải lên.")
                     sections.append(
-                        SourceSection(text=text, page=index + 1, label=f"Trang {index + 1}")
+                        SourceSection(
+                            text=text,
+                            page=index + 1,
+                            label=f"Trang {index + 1}" + (" · OCR" if extraction == "ocr" else ""),
+                            extraction=extraction,
+                            warnings=warnings,
+                        )
                     )
         elif suffix == ".docx":
             from docx import Document as WordDocument
