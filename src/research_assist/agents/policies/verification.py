@@ -15,9 +15,7 @@ def _without_list_markers(text: str) -> str:
     markers = list(_LIST_MARKER.finditer(text))
     # A lone number followed by a full stop can be a measurement at sentence end.
     # Only a complete consecutive sequence starting at one is a presentation list.
-    if len(markers) < 2 or [int(m.group(1)) for m in markers] != list(
-        range(1, len(markers) + 1)
-    ):
+    if len(markers) < 2 or [int(m.group(1)) for m in markers] != list(range(1, len(markers) + 1)):
         return text
     prefix = text[: markers[0].start()].rsplit("\n", 1)[-1].rstrip()
     if prefix and not prefix.endswith(":"):

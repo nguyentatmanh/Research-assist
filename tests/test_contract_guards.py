@@ -134,9 +134,7 @@ async def test_list_ordinals_are_not_treated_as_unsupported_measurements(
     evidence: Evidence,
 ) -> None:
     evidence = evidence.model_copy(
-        update={
-            "quote": "The procedure has these steps: • Segment clauses. • Parse clauses."
-        }
+        update={"quote": "The procedure has these steps: • Segment clauses. • Parse clauses."}
     )
     claim = Claim(
         id="cl_steps",

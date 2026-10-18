@@ -30,9 +30,7 @@ async def test_retry_reads_deeper_hits_even_when_reranker_prefers_old_hits(chunk
             return sorted(chunks, key=lambda c: c.id != old.id)
 
     search = Search()
-    agent = RetrievalAgent(
-        DemoLanguageModel(), search, Reranker(), candidate_limit=candidate_limit
-    )
+    agent = RetrievalAgent(DemoLanguageModel(), search, Reranker(), candidate_limit=candidate_limit)
     request = ResearchRequest(question="Explain retrieval evidence", top_k=2)
     plan = await agent.prepare(request)
     _, first, _ = await agent.run(request, [], plan)

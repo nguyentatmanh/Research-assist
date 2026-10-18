@@ -80,8 +80,19 @@ class ReaderAgent:
         selected = list(raw.evidence)
         supplemented = 0
         topic_terms = set(tokens(question)) - {
-            "buoc", "giai", "doan", "quy", "trinh", "steps", "step", "stages",
-            "stage", "process", "procedure", "chinh", "qua",
+            "buoc",
+            "giai",
+            "doan",
+            "quy",
+            "trinh",
+            "steps",
+            "step",
+            "stages",
+            "stage",
+            "process",
+            "procedure",
+            "chinh",
+            "qua",
         }
 
         def process_candidate(unit: dict[str, str | int]) -> int:

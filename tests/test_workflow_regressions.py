@@ -297,8 +297,7 @@ async def test_reader_prefers_complete_process_list_over_truncated_window(chunk)
         update={
             "id": "ch_partial_steps",
             "text": (
-                "The process has these steps:\n"
-                "• Segment clauses.\n• Parse each clause.\n• Combine"
+                "The process has these steps:\n• Segment clauses.\n• Parse each clause.\n• Combine"
             ),
             "start": 0,
             "end": 78,
