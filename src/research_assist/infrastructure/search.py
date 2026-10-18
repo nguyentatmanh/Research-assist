@@ -284,11 +284,15 @@ class HybridSearch:
 
 
 class NoReranker:
+    provider = "none"
+
     async def rank(self, query: str, chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
         return chunks
 
 
 class LocalReranker:
+    provider = "local"
+
     def __init__(
         self, model: str, *, device: str = "cpu", batch_size: int = 4, max_length: int = 512
     ) -> None:

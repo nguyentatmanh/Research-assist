@@ -145,8 +145,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "model": container.router.model,
             "embedding_provider": settings.embedding_provider,
             "embedding_model": settings.embedding_model if container.embedder.fingerprint else None,
-            "reranker_model": settings.reranker_model or None,
-            "demo": all(route["execution"] != "api" for route in container.router.public_routes()),
+            "reranker_model": settings.resolved_reranker_model or None,
+            "reranker_provider": settings.resolved_reranker_provider,
+            "demo": settings.resolved_reranker_provider != "cohere"
+            and all(route["execution"] != "api" for route in container.router.public_routes()),
             "max_upload_mb": settings.max_upload_mb,
             "max_rounds": 2,
             "auth_required": bool(settings.access_token.get_secret_value()),
@@ -194,10 +196,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "active_runs": len(container.runs.tasks),
             "search_cache": container.search.diagnostics(),
             "reranker": {
+                "provider": settings.resolved_reranker_provider,
+                "model": settings.resolved_reranker_model or None,
                 "batch_size": settings.reranker_batch_size,
                 "max_length": settings.reranker_max_length,
                 "device": settings.reranker_device,
                 "failure_policy": settings.reranker_failure_policy,
+                "api": (
+                    container.runs.pipeline.retrieval.reranker.diagnostics()
+                    if settings.resolved_reranker_provider == "cohere"
+                    else None
+                ),
             },
             "pdf_ocr_enabled": settings.pdf_ocr_enabled,
             "policy_version": EVIDENCE_POLICY,

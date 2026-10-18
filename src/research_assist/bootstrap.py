@@ -14,6 +14,7 @@ from research_assist.application.pipeline import ResearchPipeline
 from research_assist.application.runs import RunManager
 from research_assist.config import Settings
 from research_assist.domain.ports import Embedder, Reranker
+from research_assist.infrastructure.cohere_reranker import CohereReranker
 from research_assist.infrastructure.embeddings import APIEmbeddings, LocalEmbeddings, NoEmbeddings
 from research_assist.infrastructure.repository import Repository
 from research_assist.infrastructure.routing import ModelRouter
@@ -60,8 +61,11 @@ def build_container(
         )
     elif settings.embedding_provider == "openai":
         embedder = APIEmbeddings(settings, client)
-    reranker: Reranker = (
-        LocalReranker(
+    reranker: Reranker
+    if settings.resolved_reranker_provider == "cohere":
+        reranker = CohereReranker(settings, client, repository)
+    elif settings.resolved_reranker_provider == "local":
+        reranker = LocalReranker(
             settings.reranker_model,
             device=settings.local_device
             if settings.reranker_device == "inherit"
@@ -69,9 +73,8 @@ def build_container(
             batch_size=settings.reranker_batch_size,
             max_length=settings.reranker_max_length,
         )
-        if settings.reranker_model
-        else NoReranker()
-    )
+    else:
+        reranker = NoReranker()
     search = HybridSearch(repository, embedder, settings)
     pipeline = ResearchPipeline(
         llm,
