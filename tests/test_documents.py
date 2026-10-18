@@ -113,6 +113,23 @@ def test_chunks_have_exact_offsets(document: Document, settings: Settings) -> No
     assert chunks[-1].end == len(text.rstrip())
 
 
+def test_numbered_table_rows_remain_indexed(document: Document, settings: Settings) -> None:
+    text = (
+        "6. Results\n"
+        "The evaluation uses three sets of sentences.\n"
+        "1 General language 50 12.8\n"
+        "2 Sports 25 24\n"
+        "3 Tourism 25 26.5\n"
+        "The groups were evaluated separately."
+    )
+    chunks = chunk_sections([SourceSection(text=text, page=12)], document, settings)
+    assert any("2 Sports 25 24" in chunk.text for chunk in chunks)
+    assert any("1 General language 50" in chunk.text for chunk in chunks)
+    assert any("3 Tourism 25" in chunk.text for chunk in chunks)
+    for chunk in chunks:
+        assert chunk.text == text[chunk.start : chunk.end]
+
+
 async def test_duplicate_upload_is_idempotent(settings: Settings) -> None:
     repository = Repository(settings.data_dir)
     service = DocumentService(repository, NoEmbeddings(), settings)

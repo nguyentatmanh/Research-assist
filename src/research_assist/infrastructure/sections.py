@@ -5,6 +5,12 @@ import re
 from research_assist.domain.models import SourceSection
 
 HEADING = re.compile(r"^(?:#{1,4}\s+|\d{1,2}(?:\.\d{1,2}){0,3}\.?\s+)[^\n]{3,90}$")
+NUMBER = re.compile(r"(?<!\w)\d+(?:[.,]\d+)?%?(?!\w)")
+
+
+def _table_row(line: str) -> bool:
+    """Numbered result rows are data, even when they resemble section headings."""
+    return bool(re.match(r"^\d{1,2}\s+", line)) and len(NUMBER.findall(line)) >= 3
 
 
 def split_headings(sections: list[SourceSection]) -> list[SourceSection]:
@@ -15,7 +21,7 @@ def split_headings(sections: list[SourceSection]) -> list[SourceSection]:
         offset = 0
         for line in source.text.splitlines(keepends=True):
             clean = line.strip()
-            if HEADING.match(clean) and not clean.endswith((".", ";")):
+            if HEADING.match(clean) and not clean.endswith((".", ";")) and not _table_row(clean):
                 boundaries.append((offset, clean.lstrip("# ")))
             offset += len(line)
         starts = [0, *[offset for offset, _ in boundaries if offset > 0]]
