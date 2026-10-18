@@ -99,11 +99,25 @@ class ResearchPipeline:
             try:
                 value = await work
             except Exception:
+                failure_details: dict[str, object] = {}
+                if usage:
+                    failure_details.update(
+                        session_input_tokens=usage.input_tokens,
+                        session_output_tokens=usage.output_tokens,
+                        session_calls=usage.calls,
+                    )
+                    if agent in usage.agents:
+                        entry = usage.agents[agent]
+                        entry.elapsed_ms = round(
+                            previous_ms + (time.perf_counter() - begin) * 1000, 2
+                        )
+                        failure_details.update(entry.model_dump(exclude={"agent", "elapsed_ms"}))
                 event(
                     agent,
                     "failed",
                     "Bước này không hoàn thành.",
                     (time.perf_counter() - begin) * 1000,
+                    **failure_details,
                 )
                 raise
             elapsed = (time.perf_counter() - begin) * 1000
@@ -146,7 +160,7 @@ class ResearchPipeline:
                 plan, chunks, retrieval_warnings = await step(
                     "retrieval",
                     "Lập kế hoạch và truy xuất tài liệu.",
-                    self.retrieval.run(request, gaps, question_plan, pending_ids),
+                    self.retrieval.run(request, gaps, question_plan, pending_ids, set(all_chunks)),
                     lambda v: {
                         "queries": v[0].queries,
                         "stage": "local_search",

@@ -120,3 +120,53 @@ async def test_five_agents_call_real_http_adapter_without_demo_fallback(
         assert reused.result.markdown == finished.result.markdown
     finally:
         await container.close()
+
+
+async def test_budget_failure_trace_preserves_consumed_tokens(settings):
+    settings.llm_provider = "openai"
+    settings.openai_api_key = SecretStr("test-key")
+    settings.llm_max_total_tokens = 1000
+
+    def provider(request):
+        body = json.loads(request.content)
+        assert body["response_format"]["json_schema"]["name"] == "read_evidence"
+        unit = json.loads(body["messages"][1]["content"])["source_units"][0]
+        output = {
+            "evidence": [
+                {
+                    "chunk_id": unit["chunk_id"],
+                    "unit_id": unit["unit_id"],
+                    "quote": "",
+                    "relevance": "Relevant",
+                }
+            ],
+            "gaps": [],
+        }
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"finish_reason": "stop", "message": {"content": json.dumps(output)}}],
+                "usage": {"prompt_tokens": 990, "completion_tokens": 10},
+            },
+        )
+
+    container = build_container(settings, httpx.MockTransport(provider))
+    try:
+        await container.documents.ingest(
+            b"RAG uses external source evidence to support generated answers.", "paper.txt"
+        )
+        record = container.runs.submit(
+            ResearchRequest(question="Explain RAG evidence", max_rounds=1)
+        )
+        await container.runs.tasks[record.id]
+        finished = container.repository.run(record.id)
+        assert finished.status == "failed"
+        assert "1,000/1,000" in finished.error
+        failed = next(
+            e for e in finished.events if e.agent == "summarizer" and e.status == "failed"
+        )
+        assert failed.details["session_input_tokens"] == 990
+        assert failed.details["session_output_tokens"] == 10
+        assert failed.details["session_calls"] == 1
+    finally:
+        await container.close()
