@@ -114,13 +114,13 @@ class ReaderAgent:
                 key=process_candidate,
                 reverse=True,
             )
-            for unit in ranked[:2]:
+            for candidate_unit in ranked[:2]:
                 if len(selected) >= 24:
                     break
                 selected.append(
                     RawEvidence(
-                        chunk_id=str(unit["chunk_id"]),
-                        unit_id=str(unit["unit_id"]),
+                        chunk_id=str(candidate_unit["chunk_id"]),
+                        unit_id=str(candidate_unit["unit_id"]),
                         quote="",
                         relevance="Nguồn liệt kê trực tiếp các bước hoặc giai đoạn.",
                         requirement_ids=["rq_1"] if len(requirements or []) == 1 else [],

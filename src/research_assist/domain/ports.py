@@ -1,7 +1,7 @@
 """Dependency boundaries. An agent never imports a vendor SDK or SQL."""
 
 from collections.abc import Callable
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -43,3 +43,10 @@ class SearchTool(Protocol):
 
 class Reranker(Protocol):
     async def rank(self, query: str, chunks: list[RetrievedChunk]) -> list[RetrievedChunk]: ...
+
+
+@runtime_checkable
+class DiagnosticReranker(Reranker, Protocol):
+    """Optional runtime diagnostics; not every reranker has API counters."""
+
+    def diagnostics(self) -> dict[str, object]: ...

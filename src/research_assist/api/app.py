@@ -20,6 +20,7 @@ from research_assist.config import Settings
 from research_assist.domain.errors import CapacityError, DocumentError, NotFoundError, ResearchError
 from research_assist.domain.metadata import EVIDENCE_POLICY
 from research_assist.domain.models import ResearchRequest
+from research_assist.domain.ports import DiagnosticReranker
 
 
 class LoginBody(BaseModel):
@@ -175,6 +176,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/diagnostics")
     async def diagnostics(request: Request) -> dict[str, object]:
         container = deps(request)
+        reranker = container.runs.pipeline.retrieval.reranker
         chunks = container.repository.chunks()
         indexed = sum(
             c.vector_model == container.embedder.fingerprint and bool(c.vector) for c in chunks
@@ -203,8 +205,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "device": settings.reranker_device,
                 "failure_policy": settings.reranker_failure_policy,
                 "api": (
-                    container.runs.pipeline.retrieval.reranker.diagnostics()
+                    reranker.diagnostics()
                     if settings.resolved_reranker_provider == "cohere"
+                    and isinstance(reranker, DiagnosticReranker)
                     else None
                 ),
             },

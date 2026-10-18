@@ -93,7 +93,10 @@ async def benchmark(
                 reranker_model="",
                 chunk_strategy="chars",
             )
-        settings = Settings(_env_file=None, **options) if not live else Settings(**options)  # type: ignore[arg-type]
+        if not live:
+            # BaseSettings accepts this runtime option; Settings' generated signature omits it.
+            options["_env_file"] = None
+        settings = Settings(**options)  # type: ignore[arg-type]
         container = build_container(settings)
         try:
             documents = {}
