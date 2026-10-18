@@ -5,15 +5,34 @@ from collections import Counter
 
 from research_assist.domain.models import Claim, ClaimCheck, Evidence
 
-_NUMBER = re.compile(r"(?<!\w)\d+(?:[.,]\d+)*(?:%|％)?")
+_NUMBER = re.compile(r"(?<!\w)[+−-]?\d+(?:[.,]\d+)*(?:[eE][+-]?\d+)?(?:%|％)?")
+_LIST_MARKER = re.compile(r"(?m)(?<!\S)(\d{1,2})[.)](?=\s+\S)")
 _NEGATED = re.compile(r"(?:\bnot|\bnever|rather than|instead of|không phải|không đạt)\s*$", re.I)
 
 
+def _without_list_markers(text: str) -> str:
+    """Presentation ordinals are not numerical research claims."""
+    markers = list(_LIST_MARKER.finditer(text))
+    # A lone number followed by a full stop can be a measurement at sentence end.
+    # Only a complete consecutive sequence starting at one is a presentation list.
+    if len(markers) < 2 or [int(m.group(1)) for m in markers] != list(
+        range(1, len(markers) + 1)
+    ):
+        return text
+    prefix = text[: markers[0].start()].rsplit("\n", 1)[-1].rstrip()
+    if prefix and not prefix.endswith(":"):
+        return text
+    for marker in reversed(markers):
+        text = text[: marker.start()] + text[marker.end() :]
+    return text
+
+
 def numbers(text: str) -> set[str]:
-    return {match.group() for match in _NUMBER.finditer(text)}
+    return {match.group() for match in _NUMBER.finditer(_without_list_markers(text))}
 
 
 def number_mentions(text: str) -> set[tuple[str, bool]]:
+    text = _without_list_markers(text)
     return {
         (m.group(), bool(_NEGATED.search(text[max(0, m.start() - 40) : m.start()])))
         for m in _NUMBER.finditer(text)

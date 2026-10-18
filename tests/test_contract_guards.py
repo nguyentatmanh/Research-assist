@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from research_assist.agents.fact_checker import FactCheckerAgent
+from research_assist.agents.policies.verification import numbers
 from research_assist.agents.writer import WriterAgent
 from research_assist.config import Settings
 from research_assist.domain.coverage import report_coverage, requirements_for, validate_coverage
@@ -19,6 +20,27 @@ from research_assist.domain.models import (
 from research_assist.domain.workflow import decide_next
 from research_assist.infrastructure.llm import HTTPLanguageModel
 from tests.conftest import ScriptedLLM
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("The sample contains 99. Results follow.", {"99"}),
+        ("The count is 6. Another result is 8.", {"6", "8"}),
+        ("The count is 1. Another count is 2. Results follow.", {"1", "2"}),
+        ("Steps: 1) Read 50 records. 2) Evaluate 25 records.", {"50", "25"}),
+        ("1. Segment clauses. 2. Combine results.", set()),
+        ("Accuracy is 75.1% with 25 sentences.", {"75.1%", "25"}),
+        ("The change is -5% with learning rate 1e-3.", {"-5%", "1e-3"}),
+    ],
+)
+def test_number_guard_distinguishes_measurements_from_list_ordinals(text, expected):
+    assert numbers(text) == expected
+
+
+def test_number_guard_does_not_equate_opposite_signs_or_scientific_exponents():
+    assert not numbers("The change is -5%.").issubset(numbers("The change is 5%."))
+    assert not numbers("The rate is 1e-3.").issubset(numbers("The rate is 1."))
 
 
 def claim_and_check(evidence: Evidence) -> tuple[Claim, ClaimCheck]:
@@ -105,6 +127,37 @@ async def test_exact_negation_quote_remains_supported(evidence: Evidence) -> Non
     claim, check = claim_and_check(evidence)
     llm = ScriptedLLM({"check_claims": {"checks": [check.model_dump()]}})
     checks = await FactCheckerAgent(llm).run("How many documents?", [claim], [evidence])
+    assert checks[0].verdict == "supported"
+
+
+async def test_list_ordinals_are_not_treated_as_unsupported_measurements(
+    evidence: Evidence,
+) -> None:
+    evidence = evidence.model_copy(
+        update={
+            "quote": "The procedure has these steps: • Segment clauses. • Parse clauses."
+        }
+    )
+    claim = Claim(
+        id="cl_steps",
+        text="The procedure has these steps: 1) Segment clauses. 2) Parse clauses.",
+        evidence_ids=[evidence.id],
+    )
+    llm = ScriptedLLM(
+        {
+            "check_claims": {
+                "checks": [
+                    {
+                        "claim_id": claim.id,
+                        "verdict": "supported",
+                        "explanation": "Both steps are listed in the quote.",
+                        "evidence_ids": [evidence.id],
+                    }
+                ]
+            }
+        }
+    )
+    checks = await FactCheckerAgent(llm).run("Which steps?", [claim], [evidence])
     assert checks[0].verdict == "supported"
 
 

@@ -122,7 +122,7 @@ class EvidenceGap(Contract):
 
 class GapCheck(Contract):
     gap_index: int = Field(ge=0, le=15)
-    status: Literal["resolved", "unresolved", "unassessed"]
+    status: Literal["resolved", "unresolved", "unassessed", "irrelevant"]
     requirement_ids: list[str] = Field(default_factory=list, max_length=12)
     evidence_ids: list[str] = Field(default_factory=list, max_length=24)
     explanation: str = Field(min_length=1, max_length=700)

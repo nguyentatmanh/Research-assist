@@ -174,6 +174,32 @@ def test_resolved_gap_does_not_create_false_absence(evidence):
     assert checked[0].status == "covered" and not gaps
 
 
+def test_out_of_scope_gap_does_not_override_covered_requirement(evidence):
+    reqs = requirements_for(
+        ResearchRequest(question="Which architecture was proposed and what did it replace?")
+    )
+    coverage = [
+        CoverageCheck(
+            requirement_id="rq_1", status="covered", claim_ids=["c"], explanation="Answered"
+        )
+    ]
+    review = [
+        GapCheck(
+            gap_index=0,
+            status="irrelevant",
+            explanation="The question does not ask for positional encoding details.",
+        )
+    ]
+    checked, gaps = reconcile_gaps(
+        reqs,
+        coverage,
+        ["No positional encoding details in the retrieved quotes"],
+        review,
+        [evidence],
+    )
+    assert checked[0].status == "covered" and not gaps
+
+
 async def test_writer_never_publishes_unchecked_absence(evidence):
     claim = Claim(id="c", text=evidence.quote, evidence_ids=[evidence.id])
     check = ClaimCheck(
@@ -219,6 +245,109 @@ async def test_reader_selects_units_without_generating_quotation(chunk):
     assert evidence[0].start == chunk.start + unit["start"]
     assert evidence[0].requirement_ids == ["rq_1"]
     assert any("invalid_source_unit" in w for w in warnings)
+
+
+async def test_reader_recovers_explicit_process_list_when_model_selects_adjacent_text(chunk):
+    unrelated = chunk.model_copy(
+        update={
+            "id": "ch_context",
+            "text": "Each clause has a representative word. Links must remain planar.",
+            "start": 0,
+            "end": 63,
+        }
+    )
+    procedure = chunk.model_copy(
+        update={
+            "id": "ch_steps",
+            "text": (
+                "The analysis follows these steps:\n"
+                "• Segment the sentence into clauses.\n"
+                "• Parse each clause separately.\n"
+                "• Combine the clause analyses."
+            ),
+            "start": 0,
+            "end": 140,
+        }
+    )
+    context_unit = source_units([unrelated])[0]
+    llm = ScriptedLLM(
+        {
+            "read_evidence": {
+                "evidence": [
+                    {
+                        "chunk_id": unrelated.id,
+                        "unit_id": context_unit["unit_id"],
+                        "quote": "",
+                        "relevance": "Mentions clauses",
+                    }
+                ],
+                "gaps": [],
+            }
+        }
+    )
+    evidence, _, warnings = await ReaderAgent(llm).run(
+        "What are the steps in the analysis?", [unrelated, procedure], ["Steps"]
+    )
+    assert any(e.chunk_id == procedure.id and "Segment the sentence" in e.quote for e in evidence)
+    assert any("bổ sung" in warning for warning in warnings)
+
+
+async def test_reader_prefers_complete_process_list_over_truncated_window(chunk):
+    partial = chunk.model_copy(
+        update={
+            "id": "ch_partial_steps",
+            "text": (
+                "The process has these steps:\n"
+                "• Segment clauses.\n• Parse each clause.\n• Combine"
+            ),
+            "start": 0,
+            "end": 78,
+        }
+    )
+    complete = chunk.model_copy(
+        update={
+            "id": "ch_complete_steps",
+            "text": (
+                "The process has these steps:\n"
+                "• Segment clauses.\n• Parse each clause.\n• Combine results."
+            ),
+            "start": 0,
+            "end": 87,
+        }
+    )
+    selected_unit = source_units([partial])[0]
+    llm = ScriptedLLM(
+        {
+            "read_evidence": {
+                "evidence": [
+                    {
+                        "chunk_id": partial.id,
+                        "unit_id": selected_unit["unit_id"],
+                        "quote": "",
+                        "relevance": "A list of steps",
+                    }
+                ],
+                "gaps": [],
+            }
+        }
+    )
+    evidence, _, _ = await ReaderAgent(llm).run(
+        "What are the steps?", [partial, complete], ["Steps"]
+    )
+    assert any(e.chunk_id == complete.id and e.quote.endswith("Combine results.") for e in evidence)
+
+
+async def test_reader_does_not_supplement_process_from_another_topic(chunk):
+    unrelated = chunk.model_copy(
+        update={
+            "text": "The gardening process has these steps:\n• Plant seeds.\n• Water flowers.",
+        }
+    )
+    llm = ScriptedLLM({"read_evidence": {"evidence": [], "gaps": []}})
+    evidence, _, _ = await ReaderAgent(llm).run(
+        "What are the Transformer training steps?", [unrelated], ["Transformer training"]
+    )
+    assert not evidence
 
 
 def test_section_chunks_preserve_page_offsets(settings, document):

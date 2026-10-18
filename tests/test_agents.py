@@ -144,6 +144,70 @@ async def test_demo_judge_does_not_claim_semantic_entailment(evidence: Evidence)
     assert checked[0].verdict == "insufficient"
 
 
+async def test_checker_and_writer_preserve_supported_translation(evidence: Evidence) -> None:
+    # A stub judgement tests the application guards, not real-model semantic accuracy.
+    source = evidence.model_copy(
+        update={"quote": "The encoder is composed of a stack of 6 identical layers."}
+    )
+    claim = Claim(
+        id="cl_translation",
+        text="Encoder gồm 6 lớp giống nhau.",
+        evidence_ids=[source.id],
+    )
+    assert claim.text != source.quote
+    llm = ScriptedLLM(
+        {
+            "check_claims": {
+                "checks": [
+                    {
+                        "claim_id": claim.id,
+                        "verdict": "supported",
+                        "explanation": "The translation preserves the meaning and count.",
+                        "evidence_ids": [source.id],
+                    }
+                ]
+            }
+        }
+    )
+    checks = await FactCheckerAgent(llm).run("Encoder có bao nhiêu lớp?", [claim], [source])
+    assert checks[0].verdict == "supported"
+    _, markdown, _ = await WriterAgent(DemoLanguageModel()).run(
+        ResearchRequest(question="Encoder có bao nhiêu lớp?"),
+        [claim],
+        checks,
+        [source],
+        [],
+    )
+    assert claim.text in markdown and source.chunk_id in markdown
+
+
+async def test_semantically_rejected_claim_is_not_rescued_by_shared_words(
+    evidence: Evidence,
+) -> None:
+    source = evidence.model_copy(update={"quote": "The encoder has 6 layers."})
+    claim = Claim(id="cl_wrong_entity", text="The decoder has 6 layers.", evidence_ids=[source.id])
+    llm = ScriptedLLM(
+        {
+            "check_claims": {
+                "checks": [
+                    {
+                        "claim_id": claim.id,
+                        "verdict": "insufficient",
+                        "explanation": "The quote describes the encoder, not the decoder.",
+                        "evidence_ids": [source.id],
+                    }
+                ]
+            }
+        }
+    )
+    checks = await FactCheckerAgent(llm).run("How many decoder layers?", [claim], [source])
+    assert checks[0].verdict == "insufficient"
+    report = await WriterAgent(DemoLanguageModel()).compose(
+        ResearchRequest(question="How many decoder layers?"), [claim], checks, [source], []
+    )
+    assert not report.claim_ids
+
+
 async def test_writer_cannot_emit_unverified_claims(evidence: Evidence) -> None:
     good = Claim(id="cl_good", text=evidence.quote, evidence_ids=[evidence.id])
     bad = Claim(
