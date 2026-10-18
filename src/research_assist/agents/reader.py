@@ -5,7 +5,30 @@ from research_assist.agents.prompts.reader import INSTRUCTION
 from research_assist.domain.models import Evidence, RawEvidence, ReaderOutput, RetrievedChunk
 from research_assist.domain.ports import LanguageModel
 from research_assist.domain.source_units import source_units
-from research_assist.domain.text import tokens
+from research_assist.domain.text import fold, tokens
+
+
+def _asks_for_process(question: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:buoc|giai doan|quy trinh|trinh tu|steps?|stages?|process|procedure)\b",
+            fold(question),
+        )
+    )
+
+
+def _process_list_score(text: str) -> int:
+    """Find an explicit sequence of actions, not a passing mention of a step."""
+    folded = fold(text)
+    if not re.search(r"\b(?:buoc|giai doan|steps?|stages?)\b", folded):
+        return 0
+    listed = len(re.findall(r"(?m)^\s*(?:[•*+-]|\d+[.)])\s+", text))
+    if listed >= 2 and text.rstrip().endswith((".", ";", "!", "?")):
+        return 10 + listed
+    lead = re.search(r"\b(?:buoc|giai doan|steps?|stages?)\b[^:\n]{0,60}:\s*", folded)
+    if lead and folded[lead.end() : lead.end() + 250].count(",") >= 2:
+        return 5
+    return 0
 
 
 def quote_span(text: str, quote: str) -> tuple[int, int] | None:
@@ -54,10 +77,60 @@ class ReaderAgent:
             schema=ReaderOutput,
             fallback=lambda: self._extract(question, chunks),
         )
+        selected = list(raw.evidence)
+        supplemented = 0
+        topic_terms = set(tokens(question)) - {
+            "buoc",
+            "giai",
+            "doan",
+            "quy",
+            "trinh",
+            "steps",
+            "step",
+            "stages",
+            "stage",
+            "process",
+            "procedure",
+            "chinh",
+            "qua",
+        }
+
+        def process_candidate(unit: dict[str, str | int]) -> int:
+            text = str(unit["text"])
+            overlap = len(topic_terms & set(tokens(text)))
+            if len(topic_terms) >= 2 and overlap < 2:
+                return 0
+            score = _process_list_score(text)
+            return score + overlap if score else 0
+
+        if _asks_for_process(question) and not any(
+            process_candidate(unit_lookup[item.unit_id])
+            for item in selected
+            if item.unit_id in unit_lookup
+            and unit_lookup[item.unit_id]["chunk_id"] == item.chunk_id
+        ):
+            ranked = sorted(
+                (u for u in units if process_candidate(u)),
+                key=process_candidate,
+                reverse=True,
+            )
+            for candidate_unit in ranked[:2]:
+                if len(selected) >= 24:
+                    break
+                selected.append(
+                    RawEvidence(
+                        chunk_id=str(candidate_unit["chunk_id"]),
+                        unit_id=str(candidate_unit["unit_id"]),
+                        quote="",
+                        relevance="Nguồn liệt kê trực tiếp các bước hoặc giai đoạn.",
+                        requirement_ids=["rq_1"] if len(requirements or []) == 1 else [],
+                    )
+                )
+                supplemented += 1
         lookup = {chunk.id: chunk for chunk in chunks}
         evidence, seen, rejected = [], set(), 0
         rejection_notes: list[str] = []
-        for item in raw.evidence:
+        for item in selected:
             chunk = lookup.get(item.chunk_id)
             unit = unit_lookup.get(item.unit_id) if item.unit_id else None
             if item.unit_id:
@@ -109,6 +182,11 @@ class ReaderAgent:
         )
         if any("OCR" in e.section for e in evidence):
             warnings.append("Có bằng chứng trích từ OCR; hãy đối chiếu số liệu với ảnh trang gốc.")
+        if supplemented:
+            warnings.append(
+                f"Reader: bổ sung {supplemented} cửa sổ nguồn liệt kê quy trình; "
+                "các nhận định vẫn cần Fact Checker xác nhận."
+            )
         warnings.extend(rejection_notes)
         return evidence, raw.gaps, warnings
 

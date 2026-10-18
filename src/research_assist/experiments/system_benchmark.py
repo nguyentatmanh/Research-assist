@@ -82,11 +82,20 @@ async def benchmark(
             options.update(
                 llm_provider="demo",
                 llm_model="",
-                agent_routes={},
+                # Empty dicts are deep-merged with RA_AGENT_ROUTES from the environment.
+                # Override every role explicitly so an offline benchmark cannot call an API.
+                agent_routes={
+                    role: {"provider": "demo", "model": "extractive-demo"}
+                    for role in ("retrieval", "reader", "summarizer", "fact_checker", "writer")
+                },
                 embedding_provider="none",
+                reranker_provider="none",
                 reranker_model="",
                 chunk_strategy="chars",
             )
+        if not live:
+            # BaseSettings accepts this runtime option; Settings' generated signature omits it.
+            options["_env_file"] = None
         settings = Settings(**options)  # type: ignore[arg-type]
         container = build_container(settings)
         try:

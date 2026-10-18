@@ -101,7 +101,9 @@ async def test_second_round_can_use_new_evidence_when_first_pool_is_full(evidenc
 
             return local_plan(request)
 
-        async def run(self, request, gaps, question_plan=None, pending_ids=None):
+        async def run(
+            self, request, gaps, question_plan=None, pending_ids=None, seen_chunk_ids=None
+        ):
             return RetrievalPlan(queries=[request.question]), [object()], []
 
     class Reader:
@@ -149,7 +151,9 @@ async def test_second_round_can_use_new_evidence_when_first_pool_is_full(evidenc
     )
 
     class ActualRetrieval(Retrieval):
-        async def run(self, request, gaps, question_plan=None, pending_ids=None):
+        async def run(
+            self, request, gaps, question_plan=None, pending_ids=None, seen_chunk_ids=None
+        ):
             return RetrievalPlan(queries=[request.question]), [chunk], []
 
     llm = DemoLanguageModel()

@@ -54,6 +54,7 @@ class RetrievalAgent:
         gaps: list[str],
         question_plan: QuestionPlan | None = None,
         pending_ids: set[str] | None = None,
+        seen_chunk_ids: set[str] | None = None,
     ) -> tuple[RetrievalPlan, list[RetrievedChunk], list[str]]:
         question_plan = question_plan or await self.prepare(request)
         aspects = question_plan.aspects
@@ -68,14 +69,21 @@ class RetrievalAgent:
             warnings.append("Ngân sách candidate thấp hơn số ý; một số truy vấn chờ vòng bổ sung.")
         plan = RetrievalPlan(queries=queries, facets=[a.text for a in aspects])
         candidates: list[list[RetrievedChunk]] = []
+        seen_chunk_ids = seen_chunk_ids or set()
         for query in queries:
             chunks, notes = await self.search.search(
                 [query],
                 request.document_ids,
-                self.candidate_limit,
+                self.candidate_limit + len(seen_chunk_ids),
                 request.retrieval_mode,
             )
             warnings.extend(notes)
+            # Explore deeper ranked hits on a retry; repeating the same top_k cannot
+            # repair a missing answer. Previously accepted evidence stays in the ledger.
+            if seen_chunk_ids:
+                fresh = [c for c in chunks if c.id not in seen_chunk_ids]
+                previous = [c for c in chunks if c.id in seen_chunk_ids]
+                chunks = [*fresh, *previous][: self.candidate_limit]
             candidates.append(chunks)
         # Share the expensive reranking budget across distinct chunks. Looking deeper in each
         # local search avoids losing slots when many aspect queries return the same first hits.
@@ -92,16 +100,27 @@ class RetrievalAgent:
                 break
         for index, (query, chunks) in enumerate(zip(queries, lanes, strict=True)):
             before = [c.id for c in chunks]
+            rerank_failed = False
             try:
                 if chunks:
                     chunks = await self.reranker.rank(query, chunks)
-            except ProviderError:
+            except ProviderError as exc:
+                rerank_failed = True
                 if not self.reranker_fallback:
                     raise
-                warnings.append("Reranker không khả dụng; dùng thứ tự hybrid/BM25.")
+                warnings.append(f"Reranker không khả dụng; dùng thứ tự hybrid/BM25. {exc}")
+            if seen_chunk_ids:
+                chunks.sort(key=lambda c: c.id in seen_chunk_ids)
             plan.trace.append(
                 {
                     "query": query,
+                    "previously_seen_count": len(seen_chunk_ids),
+                    "reranker": {
+                        "provider": getattr(self.reranker, "provider", "local"),
+                        "model": getattr(self.reranker, "model_name", None),
+                        **getattr(self.reranker, "last_rank", {}),
+                        "fallback": rerank_failed,
+                    },
                     "before_rerank": before,
                     "after_rerank": [
                         {

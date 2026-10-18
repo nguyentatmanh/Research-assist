@@ -2,12 +2,43 @@ import math
 
 import pytest
 
+from research_assist.agents.retrieval import RetrievalAgent
 from research_assist.application.documents import DocumentService
 from research_assist.config import Settings
 from research_assist.domain.errors import ProviderError
+from research_assist.domain.models import ResearchRequest
 from research_assist.infrastructure.embeddings import NoEmbeddings, validate_vectors
+from research_assist.infrastructure.llm import DemoLanguageModel
 from research_assist.infrastructure.repository import Repository
 from research_assist.infrastructure.search import HybridSearch, bm25_scores
+
+
+@pytest.mark.parametrize("candidate_limit", [1, 2])
+async def test_retry_reads_deeper_hits_even_when_reranker_prefers_old_hits(chunk, candidate_limit):
+    old = chunk.model_copy(update={"id": "ch_old"})
+    fresh = chunk.model_copy(update={"id": "ch_new"})
+
+    class Search:
+        limits = []
+
+        async def search(self, queries, document_ids, top_k, mode):
+            self.limits.append(top_k)
+            return [old, fresh][:top_k], []
+
+    class Reranker:
+        async def rank(self, query, chunks):
+            return sorted(chunks, key=lambda c: c.id != old.id)
+
+    search = Search()
+    agent = RetrievalAgent(DemoLanguageModel(), search, Reranker(), candidate_limit=candidate_limit)
+    request = ResearchRequest(question="Explain retrieval evidence", top_k=2)
+    plan = await agent.prepare(request)
+    _, first, _ = await agent.run(request, [], plan)
+    trace, second, _ = await agent.run(request, [], plan, {"rq_1"}, {old.id})
+    assert first[0].id == old.id
+    assert second[0].id == fresh.id
+    assert search.limits == [candidate_limit, candidate_limit + 1]
+    assert trace.trace[0]["previously_seen_count"] == 1
 
 
 def test_bm25_prioritizes_relevant_source_and_zero_is_excluded() -> None:

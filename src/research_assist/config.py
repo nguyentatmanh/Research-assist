@@ -50,7 +50,14 @@ class Settings(BaseSettings):
     embedding_revision: str = ""
     embedding_max_seq_length: int = Field(default=512, ge=64, le=8192)
     local_device: Literal["cpu", "cuda", "mps", "auto"] = "cpu"
-    reranker_model: str = ""  # Empty disables the optional local cross-encoder.
+    reranker_provider: Literal["auto", "none", "local", "cohere"] = "auto"
+    reranker_model: str = ""  # auto preserves legacy behavior: empty disables local reranking.
+    cohere_api_key: SecretStr = SecretStr("")
+    cohere_base_url: str = "https://api.cohere.com/v2"
+    reranker_requests_per_minute: int = Field(default=8, ge=1, le=1000)
+    reranker_timeout_seconds: float = Field(default=60, ge=1, le=300)
+    reranker_cache_ttl_seconds: int = Field(default=86400, ge=0, le=604800)
+    reranker_max_tokens_per_doc: int = Field(default=4096, ge=128, le=32768)
     reranker_device: Literal["inherit", "cpu", "cuda", "mps", "auto"] = "inherit"
     reranker_batch_size: int = Field(default=4, ge=1, le=64)
     reranker_max_length: int = Field(default=512, ge=64, le=2048)
@@ -92,7 +99,11 @@ class Settings(BaseSettings):
     allowed_hosts: list[str] = ["localhost", "127.0.0.1", "testserver"]
 
     @field_validator(
-        "openai_base_url", "ollama_base_url", "embedding_base_url", "deepseek_base_url"
+        "openai_base_url",
+        "ollama_base_url",
+        "embedding_base_url",
+        "deepseek_base_url",
+        "cohere_base_url",
     )
     @classmethod
     def endpoint(cls, value: str) -> str:
@@ -105,6 +116,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_configuration(self) -> "Settings":
+        if (
+            self.resolved_reranker_provider == "cohere"
+            and not self.cohere_api_key.get_secret_value()
+        ):
+            raise ValueError("RA_COHERE_API_KEY is required for Cohere Rerank")
+        if self.resolved_reranker_provider == "local" and not self.reranker_model.strip():
+            raise ValueError("RA_RERANKER_MODEL is required for a local reranker")
         if self.chunk_overlap >= self.chunk_chars:
             raise ValueError("chunk_overlap must be smaller than chunk_chars")
         if self.chunk_token_overlap >= self.chunk_tokens:
@@ -127,6 +145,18 @@ class Settings(BaseSettings):
             if self.embedding_model == "intfloat/multilingual-e5-small":
                 raise ValueError("Set RA_EMBEDDING_MODEL to your API's embedding model")
         return self
+
+    @property
+    def resolved_reranker_provider(self) -> str:
+        if self.reranker_provider == "auto":
+            return "local" if self.reranker_model.strip() else "none"
+        return self.reranker_provider
+
+    @property
+    def resolved_reranker_model(self) -> str:
+        if self.resolved_reranker_provider == "none":
+            return ""
+        return self.reranker_model.strip() or "rerank-v4.0-pro"
 
     @property
     def resolved_model(self) -> str:

@@ -78,6 +78,7 @@ def reconcile_gaps(
     """Unvalidated free text never becomes a factual absence claim in a report.
 
     Missing/duplicate gap reviews fail closed. A resolved review must point to real evidence.
+    An irrelevant review means the candidate gap is outside the requested aspects.
     An unassigned unresolved gap conservatively invalidates covered assessments.
     """
     evidence_ids = {e.id for e in evidence}
@@ -87,6 +88,8 @@ def reconcile_gaps(
         rows = [g for g in gap_checks if g.gap_index == index]
         if len(rows) == 1:
             row = rows[0]
+            if row.status == "irrelevant":
+                continue
             if (
                 row.status == "resolved"
                 and row.evidence_ids
