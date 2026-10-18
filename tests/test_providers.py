@@ -291,6 +291,38 @@ async def test_gemini_token_cap_and_call_budget(settings: Settings) -> None:
         assert usage.calls == settings.llm_max_calls
 
 
+@pytest.mark.parametrize(
+    "sequence,expected_limits,success",
+    [
+        (["MAX_TOKENS", "invalid", "STOP"], [5000, 10000, 10000], True),
+        (["invalid", "MAX_TOKENS", "STOP"], [5000, 5000, 10000], True),
+        (["MAX_TOKENS", "invalid", "MAX_TOKENS"], [5000, 10000, 10000], False),
+    ],
+)
+async def test_json_repair_retains_grown_output_limit(settings, sequence, expected_limits, success):
+    settings.llm_provider = "gemini"
+    limits = []
+
+    def handle(request):
+        limits.append(json.loads(request.content)["generationConfig"]["maxOutputTokens"])
+        reason = sequence[len(limits) - 1]
+        if reason != "invalid":
+            return gemini_response(reason)
+        body = gemini_response().json()
+        body["candidates"][0]["content"]["parts"][0]["text"] = "invalid JSON"
+        return httpx.Response(200, json=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        with usage_scope() as usage:
+            if success:
+                assert (await generate(HTTPLanguageModel(settings, client))).queries
+            else:
+                with pytest.raises(ProviderError, match="MAX_TOKENS"):
+                    await generate(HTTPLanguageModel(settings, client))
+        assert usage.calls == 3
+    assert limits == expected_limits
+
+
 @pytest.mark.parametrize("reason", ["SAFETY", "RECITATION", "PRIVATE RAW unit-secret"])
 async def test_gemini_stop_reason_is_safe_and_not_retried(settings: Settings, reason: str) -> None:
     settings.llm_provider = "gemini"
