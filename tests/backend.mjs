@@ -12,14 +12,11 @@ export async function startBackend() {
   const server = spawn(
     process.env.RESEARCH_PYTHON || "python",
     [
-      "-m",
-      "uvicorn",
-      "research_assist.api.app:create_app",
-      "--factory",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      port,
+      "-c",
+      // Keep browser fixtures independent of a developer's real providers in .env.
+      "import uvicorn; from research_assist.api.app import create_app; " +
+        "from research_assist.config import Settings; " +
+        `uvicorn.run(create_app(Settings(_env_file=None)), host='127.0.0.1', port=${Number(port)})`,
     ],
     {
       env: {
@@ -33,6 +30,7 @@ export async function startBackend() {
         RA_CHUNK_STRATEGY: "chars",
         RA_LOCAL_DEVICE: "cpu",
         RA_RERANKER_MODEL: "",
+        RA_RERANKER_PROVIDER: "none",
         RA_PDF_OCR_ENABLED: "false",
         RA_ACCESS_TOKEN: "",
       },
