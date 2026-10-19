@@ -1,4 +1,4 @@
-import { $, el } from "./dom.js";
+import { $, el, icon } from "./dom.js";
 
 export const roleLabels = {
   retrieval: "Retrieval",
@@ -13,8 +13,21 @@ export function renderRoutes(routes) {
   root.replaceChildren();
   for (const route of routes) {
     const item = el("div", "route-item");
+    item.dataset.agent = route.agent;
+    const role = el("strong", "", "");
+    const roleIcons = {
+      retrieval: "search",
+      reader: "book",
+      summarizer: "stack",
+      fact_checker: "shield",
+      writer: "pen",
+    };
+    role.append(
+      icon(roleIcons[route.agent] || "settings"),
+      document.createTextNode(roleLabels[route.agent] || route.agent),
+    );
     item.append(
-      el("strong", "", roleLabels[route.agent] || route.agent),
+      role,
       el("span", "", route.model),
       el(
         "small",

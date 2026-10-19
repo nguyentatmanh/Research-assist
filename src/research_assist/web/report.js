@@ -135,6 +135,12 @@ export function selectTab(name) {
 }
 
 export function renderEvents(events, status) {
+  const emptyState = $("#activity-empty");
+  if (emptyState) emptyState.hidden = events.length > 0;
+  const eventCount = $("#trace-count");
+  if (eventCount) eventCount.textContent = `${events.length} sự kiện`;
+  $("#back-research").textContent =
+    status === "completed" ? "Xem kết quả nghiên cứu" : "Về câu hỏi";
   const latest = new Map();
   for (const event of events) latest.set(event.agent, event);
   $$(".agent-node").forEach((node) => {
@@ -153,6 +159,7 @@ export function renderEvents(events, status) {
   statusLabel.textContent = status
     ? statuses[status].toUpperCase()
     : "SẴN SÀNG";
+  statusLabel.dataset.status = status || "ready";
   statusLabel.classList.toggle(
     "running",
     status === "running" || status === "queued",
@@ -266,6 +273,7 @@ export function renderResult(result) {
   renderEvidence(result.evidence);
   renderEvents(result.events, "completed");
   selectTab("report");
+  window.dispatchEvent(new Event("research-result-rendered"));
 }
 
 function renderChecks(result) {
@@ -343,7 +351,20 @@ function renderEvidence(evidence) {
     });
     root.append(card);
   });
+  filterEvidence();
 }
+
+function filterEvidence() {
+  const search = $("#evidence-search");
+  if (!search) return;
+  const query = search.value.trim().toLocaleLowerCase("vi");
+  const cards = $$(".evidence-card");
+  cards.forEach((card) => {
+    card.hidden = !card.textContent.toLocaleLowerCase("vi").includes(query);
+  });
+  $("#evidence-no-match").hidden = !query || cards.some((card) => !card.hidden);
+}
+$("#evidence-search")?.addEventListener("input", filterEvidence);
 
 export function showEvidence(evidence) {
   if (!currentResult) return;
