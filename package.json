@@ -6,7 +6,9 @@
     "test:dom": "node tests/dom.spec.mjs",
     "test:ui": "node tests/ui.spec.mjs",
     "format:web": "prettier --write src/research_assist/web/*.{html,css,js}",
-    "test:ui:workflow": "node tests/ui_workflow.spec.mjs"
+    "test:ui:workflow": "node tests/ui_workflow.spec.mjs",
+    "test:ui:design": "node tests/ui_design.spec.mjs",
+    "test:ui:fonts": "node tests/ui_fonts.spec.mjs"
   },
   "devDependencies": {
     "jsdom": "^26.1.0",
