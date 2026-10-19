@@ -83,6 +83,18 @@ function renderDocuments() {
     ),
   );
   $("#nav-doc-count").textContent = String(state.documents.length);
+  $("#selected-doc-count").textContent =
+    `${state.scopeMode === "all" ? state.documents.length : state.selected.size}/${state.documents.length}`;
+  $("#library-total").textContent = String(state.documents.length);
+  $("#library-chunks").textContent = state.documents
+    .reduce((sum, doc) => sum + doc.chunk_count, 0)
+    .toLocaleString("vi-VN");
+  $("#getting-started-title").textContent = state.documents.length
+    ? "Tài liệu đã sẵn sàng. Bắt đầu khám phá thôi."
+    : "Bắt đầu từ tài liệu bạn tin cậy";
+  $("#getting-started-note").textContent = state.documents.length
+    ? "Chọn nguồn, nhập câu hỏi hoặc dùng một gợi ý ở bên cạnh."
+    : "Tải tài liệu của bạn hoặc khám phá bằng bộ ghi chú mẫu.";
   const sidebar = $("#sidebar-documents");
   sidebar.replaceChildren();
   if (!state.documents.length)
@@ -119,20 +131,32 @@ function renderDocuments() {
     row.append(input, text);
     sidebar.append(row);
   }
+  renderLibrary();
+  renderScopePicker();
+  renderScope();
+}
+
+function renderLibrary() {
   const body = $("#document-table-body");
   body.replaceChildren();
-  if (!state.documents.length) {
+  const query = $("#library-search").value.trim().toLocaleLowerCase("vi");
+  const documents = state.documents.filter((doc) =>
+    `${doc.title} ${doc.filename}`.toLocaleLowerCase("vi").includes(query),
+  );
+  if (!documents.length) {
     const row = el("tr");
     const cell = el(
       "td",
       "table-empty",
-      "Tải tài liệu hoặc nạp bộ ghi chú mẫu để bắt đầu.",
+      query
+        ? "Không tìm thấy tài liệu phù hợp. Thử một từ khóa khác."
+        : "Kho tri thức của bạn đang chờ. Tải tài liệu hoặc nạp bộ ghi chú mẫu để bắt đầu.",
     );
     cell.colSpan = 5;
     row.append(cell);
     body.append(row);
   }
-  for (const document of state.documents) {
+  for (const document of documents) {
     const row = el("tr");
     const first = el("td");
     first.append(
@@ -173,11 +197,14 @@ function renderDocuments() {
     row.append(actions);
     body.append(row);
   }
-  renderScopePicker();
-  renderScope();
 }
 
 function renderScope() {
+  const selectedCount =
+    state.scopeMode === "all" ? state.documents.length : state.selected.size;
+  $("#library-selected").textContent = String(selectedCount);
+  $("#selected-doc-count").textContent =
+    `${selectedCount}/${state.documents.length}`;
   $("#scope-mode").value = state.scopeMode;
   $("#scope-label").textContent =
     state.scopeMode === "all"
@@ -189,6 +216,36 @@ function renderScope() {
   $("#scope-filenames").textContent = names.length
     ? names.map((d) => d.filename).join(" · ")
     : "Chưa chọn tài liệu";
+  updateResearchSteps();
+}
+
+function updateResearchSteps() {
+  const hasSources =
+    state.scopeMode === "all"
+      ? state.documents.length > 0
+      : state.selected.size > 0;
+  const hasQuestion = $("#question").value.trim().length >= 8;
+  const hasReport = !$("#results-section").hidden;
+  const steps = [$("#step-sources"), $("#step-question"), $("#step-report")];
+  steps.forEach((step, index) => {
+    const complete =
+      index === 0
+        ? hasSources
+        : index === 1
+          ? hasSources && hasQuestion
+          : hasReport;
+    const current =
+      !hasReport &&
+      (index === 0
+        ? !hasSources
+        : index === 1
+          ? hasSources && !hasQuestion
+          : hasSources && hasQuestion);
+    step.classList.toggle("complete", complete);
+    step.classList.toggle("current", current);
+    if (current) step.setAttribute("aria-current", "step");
+    else step.removeAttribute("aria-current");
+  });
 }
 
 async function refreshDocuments() {
@@ -201,7 +258,10 @@ function setWorking(value) {
   $("#run-button").disabled = value;
   $("#cancel-button").hidden = !value;
   $("#question").disabled = value;
-  $("#suggestion-area").hidden = true;
+  $("#suggestion-area").hidden = value;
+  $$(".prompt-chip").forEach((button) => {
+    button.disabled = value;
+  });
   $("#activity-cancel").hidden = !value;
   $("#scope-mode").disabled = value;
   $("#choose-sources").disabled = value;
@@ -451,6 +511,8 @@ function switchView(name) {
   });
   $$(".main-nav .nav-item").forEach((item) => {
     item.classList.toggle("active", item.dataset.view === name);
+    if (item.dataset.view === name) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
   });
   $("#breadcrumb-view").textContent = {
     research: "Nghiên cứu",
@@ -459,7 +521,9 @@ function switchView(name) {
     history: "Lịch sử phiên",
     experiments: "Thực nghiệm",
   }[name];
-  $("#sidebar").classList.remove("open");
+  const menuWasOpen = $("#sidebar").classList.contains("open");
+  setSidebarOpen(false);
+  if (menuWasOpen) $("#main-content").focus({ preventScroll: true });
 }
 
 async function showHistory() {
@@ -551,6 +615,7 @@ $("#dropzone").addEventListener("drop", (event) => {
 });
 $("#question").addEventListener("input", (event) => {
   $("#question-count").textContent = `${event.target.value.length} / 2000`;
+  updateResearchSteps();
 });
 $("#question").addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -629,9 +694,64 @@ $$("dialog").forEach((dialog) =>
     }
   }),
 );
+const mobileLayout = window.matchMedia?.("(max-width: 800px)");
+function setSidebarOpen(open) {
+  $("#sidebar").classList.toggle("open", open);
+  $("#sidebar-backdrop").hidden = !open;
+  $("#sidebar").inert = Boolean(mobileLayout?.matches && !open);
+  $(".content-shell").inert = Boolean(mobileLayout?.matches && open);
+  document.body.classList.toggle(
+    "menu-open",
+    Boolean(mobileLayout?.matches && open),
+  );
+  $("#mobile-menu").setAttribute("aria-expanded", String(open));
+  $("#mobile-menu").setAttribute("aria-label", open ? "Đóng menu" : "Mở menu");
+  if (open) $(".main-nav .active").focus();
+}
+mobileLayout?.addEventListener("change", () => setSidebarOpen(false));
+setSidebarOpen(false);
 $("#mobile-menu").addEventListener("click", () =>
-  $("#sidebar").classList.toggle("open"),
+  setSidebarOpen(!$("#sidebar").classList.contains("open")),
 );
+$("#sidebar-backdrop").addEventListener("click", () => {
+  setSidebarOpen(false);
+  $("#mobile-menu").focus();
+});
+document.addEventListener("keydown", (event) => {
+  if (
+    event.key === "Tab" &&
+    mobileLayout?.matches &&
+    $("#sidebar").classList.contains("open")
+  ) {
+    const focusable = $$(
+      "#sidebar a, #sidebar button:not(:disabled), #sidebar input:not(:disabled):not([hidden])",
+    );
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+  if (event.key === "Escape" && $("#sidebar").classList.contains("open")) {
+    setSidebarOpen(false);
+    $("#mobile-menu").focus();
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if (!document.querySelector("dialog[open]")) openLibrarySearch();
+  }
+});
+function openLibrarySearch() {
+  switchView("library");
+  $("#library-search").focus();
+}
+$("#workspace-search").addEventListener("click", openLibrarySearch);
+$("#library-search").addEventListener("input", renderLibrary);
+window.addEventListener("research-result-rendered", updateResearchSteps);
 $$(".tab").forEach((button) =>
   button.addEventListener("click", () => selectTab(button.dataset.tab)),
 );
@@ -727,6 +847,10 @@ function activityRecord(record) {
     `${record.request.question} · ${statuses[record.status]}`;
   $("#export-trace").hidden = false;
   $("#export-trace").href = `/api/runs/${record.id}/trace`;
+  const documents = record.scope_documents || [];
+  $("#activity-sources").textContent = documents.length
+    ? documents.map((doc) => doc.filename).join(" · ")
+    : "Phạm vi được lưu trong nhật ký phiên.";
 }
 $("#scope-mode").addEventListener("change", (e) => {
   state.scopeMode = e.target.value;
@@ -743,7 +867,11 @@ $("#scope-clear").addEventListener("click", () => {
     renderDocuments();
   }
 });
-$("#back-research").addEventListener("click", () => switchView("research"));
+$("#back-research").addEventListener("click", () => {
+  switchView("research");
+  if (!$("#results-section").hidden)
+    $("#results-section").scrollIntoView?.({ block: "start" });
+});
 $("#activity-cancel").addEventListener("click", cancelResearch);
 $("#trace-filter").addEventListener("change", (e) => {
   $$(".trace-item").forEach(

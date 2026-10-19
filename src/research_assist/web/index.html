@@ -3,13 +3,29 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f6f5f2" />
+    <meta name="theme-color" content="#0f5132" />
     <title>Research Desk · AI Research Assist</title>
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <link
+      rel="preload"
+      href="/assets/noto-sans-variable.woff"
+      as="font"
+      type="font/woff"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/assets/newsreader-variable.woff"
+      as="font"
+      type="font/woff"
+      crossorigin
+    />
+    <link rel="stylesheet" href="/assets/fonts.css" />
     <link rel="stylesheet" href="/assets/styles.css" />
     <script type="module" src="/assets/app.js"></script>
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Đến nội dung chính</a>
     <svg
       class="icon-definitions"
       aria-hidden="true"
@@ -77,11 +93,22 @@
       <symbol id="i-menu" viewBox="0 0 24 24">
         <path d="M4 6h16M4 12h16M4 18h16" />
       </symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24">
+        <path
+          d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3ZM20 2v4m-2-2h4"
+        />
+      </symbol>
+      <symbol id="i-flask" viewBox="0 0 24 24">
+        <path
+          d="M9 3h6M10 3v6L4 19a1.3 1.3 0 0 0 1 2h14a1.3 1.3 0 0 0 1-2L14 9V3M7 15h10"
+        />
+      </symbol>
     </svg>
     <div class="app-shell">
       <aside class="sidebar" id="sidebar">
         <a class="brand" href="/" aria-label="Research Desk trang chủ"
-          ><span class="brand-mark">r<span>↗</span></span
+          ><span class="brand-mark"
+            ><svg><use href="#i-book" /></svg></span
           ><span
             >research<span class="brand-light">desk</span
             ><small>AI RESEARCH ASSIST</small></span
@@ -92,8 +119,13 @@
           <div>Research workspace<small>Không gian nghiên cứu</small></div>
           <span class="tiny-dot"></span>
         </div>
+        <div class="nav-section-label">KHÔNG GIAN LÀM VIỆC</div>
         <nav class="main-nav" aria-label="Điều hướng">
-          <button class="nav-item active" data-view="research">
+          <button
+            class="nav-item active"
+            data-view="research"
+            aria-current="page"
+          >
             <svg><use href="#i-search" /></svg>Nghiên cứu<span class="key-hint"
               >01</span
             >
@@ -106,18 +138,22 @@
             >
           </button>
           <button class="nav-item" data-view="activity">
-            <svg><use href="#i-settings" /></svg>Hoạt động agent
+            <svg><use href="#i-spark" /></svg>Hoạt động agent<span
+              class="nav-live-dot"
+              aria-hidden="true"
+            ></span>
           </button>
           <button class="nav-item" data-view="history">
             <svg><use href="#i-clock" /></svg>Lịch sử phiên
           </button>
           <button class="nav-item" data-view="experiments">
-            <svg><use href="#i-shield" /></svg>Thực nghiệm
+            <svg><use href="#i-flask" /></svg>Thực nghiệm
             <span class="count">LAB</span>
           </button>
         </nav>
         <div class="sidebar-section-heading">
           <span>TÀI LIỆU TRONG PHIÊN</span
+          ><span id="selected-doc-count" class="selection-count">0/0</span
           ><button
             id="sidebar-upload"
             class="icon-button"
@@ -150,6 +186,12 @@
           <div class="sidebar-footer">5 agent · Bằng chứng có thể truy vết</div>
         </div>
       </aside>
+      <button
+        id="sidebar-backdrop"
+        class="sidebar-backdrop"
+        aria-label="Đóng menu"
+        hidden
+      ></button>
       <div class="content-shell">
         <header class="topbar">
           <div class="breadcrumb">
@@ -157,6 +199,8 @@
               class="icon-button mobile-menu"
               id="mobile-menu"
               aria-label="Mở menu"
+              aria-controls="sidebar"
+              aria-expanded="false"
             >
               <svg><use href="#i-menu" /></svg></button
             ><svg><use href="#i-book" /></svg><span>Workspace</span
@@ -164,160 +208,279 @@
             ><strong id="breadcrumb-view">Nghiên cứu</strong>
           </div>
           <div class="topbar-right">
+            <button
+              class="topbar-search"
+              id="workspace-search"
+              aria-label="Tìm tài liệu trong kho"
+            >
+              <svg><use href="#i-search" /></svg
+              ><span>Tìm trong kho tài liệu…</span><kbd>Ctrl K</kbd>
+            </button>
             <span class="provider-pill" id="provider-pill"
               ><span class="status-dot"></span>Đang kết nối</span
             ><span class="user-avatar" title="Research workspace">RA</span>
           </div>
         </header>
-        <main>
+        <main id="main-content" tabindex="-1">
           <section id="view-research" class="view">
             <div class="page-heading">
               <div>
-                <p class="eyebrow">RESEARCH DESK</p>
+                <p class="eyebrow">
+                  <span class="status-dot"></span> KHÔNG GIAN NGHIÊN CỨU CỦA BẠN
+                </p>
                 <h1>Nghiên cứu tài liệu</h1>
-                <p>Đặt câu hỏi. Đối chiếu câu trả lời với nguồn.</p>
+                <p>Khám phá ý tưởng. Kết nối tri thức. Luôn có bằng chứng.</p>
+              </div>
+              <div class="heading-note">
+                <span class="mini-agents" aria-hidden="true"
+                  ><svg><use href="#i-search" /></svg
+                  ><svg><use href="#i-book" /></svg
+                  ><svg><use href="#i-stack" /></svg
+                  ><svg><use href="#i-shield" /></svg
+                  ><svg><use href="#i-pen" /></svg></span
+                ><span>5 agent, một luồng nghiên cứu</span>
               </div>
             </div>
-            <div id="mode-notice" class="mode-notice" hidden>
-              <span class="notice-label">DEMO</span>
-              <p>
-                Đang dùng chế độ trích xuất không cần key. Bật mô hình trong
-                <button id="notice-settings">Cấu hình</button> để nghiên cứu
-                bằng AI.
-              </p>
-            </div>
-            <section class="question-card" aria-labelledby="question-title">
-              <div class="card-label">
-                <svg><use href="#i-search" /></svg
-                ><label id="question-title" for="question"
-                  >Câu hỏi nghiên cứu</label
-                ><span id="question-count">0 / 2000</span>
-              </div>
-              <textarea
-                id="question"
-                rows="3"
-                maxlength="2000"
-                placeholder="Ví dụ: RAG và Self-RAG khác nhau như thế nào về truy xuất và kiểm tra câu trả lời?"
-              ></textarea>
-              <details class="requirement-options">
-                <summary>Các ý cần trả lời <span>tùy chọn</span></summary>
-                <label for="requirements"
-                  >Mỗi dòng một ý, tối đa 12. Để trống để hệ thống phân tích câu
-                  hỏi.</label
-                >
-                <textarea
-                  id="requirements"
-                  rows="3"
-                  maxlength="6012"
-                  placeholder="Phương pháp truy xuất
+            <ol class="research-steps" aria-label="Các bước nghiên cứu">
+              <li id="step-sources" class="current">
+                <span>01</span>
+                <div>Chọn tài liệu<small>Nguồn tri thức của bạn</small></div>
+                <svg><use href="#i-check" /></svg>
+              </li>
+              <li id="step-question">
+                <span>02</span>
+                <div>Đặt câu hỏi<small>Xác định điều cần khám phá</small></div>
+                <svg><use href="#i-check" /></svg>
+              </li>
+              <li id="step-report">
+                <span>03</span>
+                <div>
+                  Khám phá kết quả<small>Báo cáo đi cùng bằng chứng</small>
+                </div>
+                <svg><use href="#i-check" /></svg>
+              </li>
+            </ol>
+            <div class="research-layout">
+              <div class="research-compose">
+                <div id="mode-notice" class="mode-notice" hidden>
+                  <span class="notice-label">DEMO</span>
+                  <p>
+                    Đang dùng chế độ trích xuất không cần key. Bật mô hình trong
+                    <button id="notice-settings">Cấu hình</button> để nghiên cứu
+                    bằng AI.
+                  </p>
+                </div>
+                <section class="question-card" aria-labelledby="question-title">
+                  <div class="card-label">
+                    <svg><use href="#i-search" /></svg
+                    ><label id="question-title" for="question"
+                      >Bạn muốn tìm hiểu điều gì?</label
+                    ><span id="question-count">0 / 2000</span>
+                  </div>
+                  <textarea
+                    id="question"
+                    rows="4"
+                    maxlength="2000"
+                    aria-describedby="question-helper"
+                    placeholder="Ví dụ: RAG và Self-RAG khác nhau như thế nào về truy xuất và kiểm tra câu trả lời?"
+                  ></textarea>
+                  <p id="question-helper" class="input-helper">
+                    Hỏi cụ thể để tìm đúng bằng chứng trong tài liệu của bạn.
+                  </p>
+                  <details class="requirement-options">
+                    <summary>Các ý cần trả lời <span>tùy chọn</span></summary>
+                    <label for="requirements"
+                      >Mỗi dòng một ý, tối đa 12. Để trống để hệ thống phân tích
+                      câu hỏi.</label
+                    >
+                    <textarea
+                      id="requirements"
+                      rows="3"
+                      maxlength="6012"
+                      placeholder="Phương pháp truy xuất
 Cách kiểm tra bằng chứng
 Hạn chế được tác giả nêu"
-                ></textarea>
-              </details>
-              <div class="scope-control">
-                <label
-                  >Phạm vi
-                  <select id="scope-mode">
-                    <option value="selected">Tài liệu đã chọn</option>
-                    <option value="all">Toàn bộ kho</option>
-                  </select></label
-                ><button id="choose-sources" class="secondary-button">
-                  Chọn tài liệu
-                </button>
-                <div id="scope-filenames" class="scope-filenames"></div>
-              </div>
-              <div class="question-tools">
-                <div class="question-scope">
-                  <svg><use href="#i-stack" /></svg
-                  ><span id="scope-label">Chưa có tài liệu</span>
+                    ></textarea>
+                  </details>
+                  <div class="scope-control">
+                    <label
+                      >Phạm vi
+                      <select id="scope-mode" aria-label="Phạm vi tài liệu">
+                        <option value="selected">Tài liệu đã chọn</option>
+                        <option value="all">Toàn bộ kho</option>
+                      </select></label
+                    ><button id="choose-sources" class="secondary-button">
+                      Chọn tài liệu
+                    </button>
+                    <div id="scope-filenames" class="scope-filenames"></div>
+                  </div>
+                  <div class="question-tools">
+                    <div class="question-scope">
+                      <svg><use href="#i-stack" /></svg
+                      ><span id="scope-label">Chưa có tài liệu</span>
+                    </div>
+                    <button
+                      class="text-button"
+                      id="advanced-toggle"
+                      aria-expanded="false"
+                    >
+                      <svg><use href="#i-settings" /></svg>Tùy chỉnh</button
+                    ><button id="run-button" class="primary-button">
+                      <span>Bắt đầu nghiên cứu</span
+                      ><svg><use href="#i-arrow" /></svg></button
+                    ><button id="cancel-button" class="secondary-button" hidden>
+                      Dừng phiên
+                    </button>
+                  </div>
+                  <div id="advanced-panel" class="advanced-panel" hidden>
+                    <label
+                      >Chế độ chạy<select id="workflow-profile">
+                        <option value="balanced">
+                          Cân bằng · Writer local
+                        </option>
+                        <option value="academic">
+                          Học thuật · Writer qua model
+                        </option>
+                      </select></label
+                    >
+                    <label
+                      >Kiểu báo cáo<select id="report-style">
+                        <option value="overview">Tổng quan</option>
+                        <option value="comparison">So sánh</option>
+                        <option value="literature_review">
+                          Tổng quan tài liệu
+                        </option>
+                      </select></label
+                    ><label
+                      >Ngôn ngữ<select id="language">
+                        <option value="vi">Tiếng Việt</option>
+                        <option value="en">English</option>
+                      </select></label
+                    ><label
+                      >Truy xuất<select id="retrieval-mode">
+                        <option value="hybrid">
+                          Hybrid (nếu có embedding)
+                        </option>
+                        <option value="lexical">BM25</option>
+                      </select></label
+                    ><label
+                      >Số đoạn<select id="top-k">
+                        <option value="4">4 đoạn</option>
+                        <option value="8">8 đoạn</option>
+                        <option value="12" selected>12 đoạn</option>
+                      </select></label
+                    ><label
+                      >Số vòng tối đa<select id="max-rounds">
+                        <option value="1" selected>1 vòng</option>
+                        <option value="2">2 vòng</option>
+                      </select></label
+                    >
+                    <label class="cache-control"
+                      ><input type="checkbox" id="use-cache" checked />Tái sử
+                      dụng kết quả đã lưu</label
+                    >
+                  </div>
+                  <p class="keyboard-note">
+                    <kbd>Ctrl</kbd> + <kbd>Enter</kbd> để bắt đầu
+                    <span>·</span> Trích dẫn có thể mở về nguồn
+                  </p>
+                </section>
+                <div id="suggestion-area" class="suggestion-area">
+                  <span>THỬ HỎI VỚI TÀI LIỆU MẪU</span
+                  ><button
+                    class="prompt-chip"
+                    data-question="RAG và Self-RAG khác nhau như thế nào về truy xuất và kiểm tra câu trả lời?"
+                  >
+                    So sánh RAG & Self-RAG <span>↗</span></button
+                  ><button
+                    class="prompt-chip"
+                    data-question="Các hạn chế của RAG là gì và kiểm tra bằng chứng có vai trò như thế nào?"
+                  >
+                    Tìm hạn chế & khoảng trống <span>↗</span>
+                  </button>
                 </div>
-                <button
-                  class="text-button"
-                  id="advanced-toggle"
-                  aria-expanded="false"
-                >
-                  <svg><use href="#i-settings" /></svg>Tùy chỉnh</button
-                ><button id="run-button" class="primary-button">
-                  <span>Bắt đầu nghiên cứu</span
-                  ><svg><use href="#i-arrow" /></svg></button
-                ><button id="cancel-button" class="secondary-button" hidden>
-                  Dừng phiên
-                </button>
+                <section id="empty-state" class="empty-state">
+                  <div class="empty-icon">
+                    <svg><use href="#i-file" /></svg>
+                  </div>
+                  <div>
+                    <h3 id="getting-started-title">
+                      Bắt đầu từ tài liệu bạn tin cậy
+                    </h3>
+                    <p>
+                      <span id="getting-started-note"
+                        >Tải tài liệu của bạn hoặc khám phá bằng bộ ghi chú
+                        mẫu.</span
+                      >
+                    </p>
+                  </div>
+                  <button id="seed-button" class="secondary-button">
+                    Thử tài liệu mẫu <span>↗</span>
+                  </button>
+                </section>
               </div>
-              <div id="advanced-panel" class="advanced-panel" hidden>
-                <label
-                  >Chế độ chạy<select id="workflow-profile">
-                    <option value="balanced">Cân bằng · Writer local</option>
-                    <option value="academic">
-                      Học thuật · Writer qua model
-                    </option>
-                  </select></label
-                >
-                <label
-                  >Kiểu báo cáo<select id="report-style">
-                    <option value="overview">Tổng quan</option>
-                    <option value="comparison">So sánh</option>
-                    <option value="literature_review">
-                      Tổng quan tài liệu
-                    </option>
-                  </select></label
-                ><label
-                  >Ngôn ngữ<select id="language">
-                    <option value="vi">Tiếng Việt</option>
-                    <option value="en">English</option>
-                  </select></label
-                ><label
-                  >Truy xuất<select id="retrieval-mode">
-                    <option value="hybrid">Hybrid (nếu có embedding)</option>
-                    <option value="lexical">BM25</option>
-                  </select></label
-                ><label
-                  >Số đoạn<select id="top-k">
-                    <option value="4">4 đoạn</option>
-                    <option value="8">8 đoạn</option>
-                    <option value="12" selected>12 đoạn</option>
-                  </select></label
-                ><label
-                  >Số vòng tối đa<select id="max-rounds">
-                    <option value="1" selected>1 vòng</option>
-                    <option value="2">2 vòng</option>
-                  </select></label
-                >
-                <label class="cache-control"
-                  ><input type="checkbox" id="use-cache" checked />Tái sử dụng
-                  kết quả đã lưu</label
-                >
-              </div>
-            </section>
-            <div id="suggestion-area" class="suggestion-area" hidden>
-              <span>BẮT ĐẦU VỚI</span
-              ><button
-                class="prompt-chip"
-                data-question="RAG và Self-RAG khác nhau như thế nào về truy xuất và kiểm tra câu trả lời?"
-              >
-                So sánh RAG & Self-RAG <span>↗</span></button
-              ><button
-                class="prompt-chip"
-                data-question="Các hạn chế của RAG là gì và kiểm tra bằng chứng có vai trò như thế nào?"
-              >
-                Tìm hạn chế & khoảng trống <span>↗</span>
-              </button>
-            </div>
-            <section id="empty-state" class="empty-state">
-              <div class="empty-icon">
-                <svg><use href="#i-file" /></svg>
-              </div>
-              <div>
-                <h3>Bắt đầu từ những tài liệu bạn tin cậy.</h3>
-                <p>
-                  Tải paper, tài liệu kỹ thuật hoặc thử bộ ghi chú mẫu để khám
-                  phá quy trình.
+              <aside class="research-aside" aria-label="Hướng dẫn nghiên cứu">
+                <article class="insight-card">
+                  <span class="insight-tag"
+                    ><svg><use href="#i-spark" /></svg> TỪ NGUỒN ĐẾN TRI
+                    THỨC</span
+                  >
+                  <div class="paper-illustration" aria-hidden="true">
+                    <div class="paper-sheet paper-back"></div>
+                    <div class="paper-sheet paper-front">
+                      <svg><use href="#i-book" /></svg><i></i><i></i><i></i
+                      ><span
+                        ><svg><use href="#i-check" /></svg> Có bằng chứng</span
+                      >
+                    </div>
+                    <span class="paper-spark">✦</span>
+                  </div>
+                  <h2>Mỗi nhận định,<br />một điểm tựa.</h2>
+                  <p>
+                    Đọc sâu hơn, hiểu rõ hơn với câu trả lời được đối chiếu từ
+                    chính tài liệu của bạn.
+                  </p>
+                  <div class="insight-footer">
+                    <svg><use href="#i-shield" /></svg> Trích dẫn nguyên văn,
+                    truy vết tới nguồn
+                  </div>
+                </article>
+                <article class="guide-card">
+                  <div class="guide-heading">
+                    <span class="guide-icon"
+                      ><svg><use href="#i-spark" /></svg
+                    ></span>
+                    <h3>Một câu hỏi hay bắt đầu từ…</h3>
+                  </div>
+                  <p>Mục tiêu rõ ràng và nguồn phù hợp. Bạn có thể thử:</p>
+                  <button
+                    class="prompt-chip guide-prompt"
+                    data-question="Tóm tắt những đóng góp chính và bằng chứng hỗ trợ trong các tài liệu đã chọn."
+                  >
+                    <svg><use href="#i-file" /></svg
+                    ><span>Tóm tắt đóng góp chính</span><span>↗</span>
+                  </button>
+                  <button
+                    class="prompt-chip guide-prompt"
+                    data-question="So sánh các phương pháp trong tài liệu đã chọn, nêu điểm giống, khác và dẫn chứng tương ứng."
+                  >
+                    <svg><use href="#i-stack" /></svg
+                    ><span>So sánh các phương pháp</span><span>↗</span>
+                  </button>
+                  <button
+                    class="prompt-chip guide-prompt"
+                    data-question="Các tài liệu đã chọn nêu những hạn chế nào và gợi ý hướng nghiên cứu tiếp theo ra sao?"
+                  >
+                    <svg><use href="#i-search" /></svg
+                    ><span>Tìm khoảng trống nghiên cứu</span><span>↗</span>
+                  </button>
+                </article>
+                <p class="aside-note">
+                  <svg><use href="#i-book" /></svg> Tri thức bắt đầu từ việc đặt
+                  câu hỏi.
                 </p>
-              </div>
-              <button id="seed-button" class="secondary-button">
-                Thử tài liệu mẫu <span>↗</span>
-              </button>
-            </section>
+              </aside>
+            </div>
             <section id="results-section" class="results-section" hidden>
               <div class="section-heading results-heading">
                 <div>
@@ -382,6 +545,17 @@ Hạn chế được tác giả nêu"
                   <p class="evidence-note">
                     Trích nguyên văn · truy vết tới nguồn
                   </p>
+                  <label class="search-field evidence-search"
+                    ><svg><use href="#i-search" /></svg
+                    ><input
+                      id="evidence-search"
+                      type="search"
+                      placeholder="Tìm trong bằng chứng…"
+                      aria-label="Tìm trong bằng chứng"
+                  /></label>
+                  <p id="evidence-no-match" class="filter-empty" hidden>
+                    Không có bằng chứng phù hợp.
+                  </p>
                   <div id="evidence-list"></div>
                 </aside>
               </div>
@@ -389,6 +563,9 @@ Hạn chế được tác giả nêu"
           </section>
           <section id="view-activity" class="view" hidden>
             <div class="simple-heading">
+              <div class="eyebrow">
+                <span class="status-dot"></span> LUỒNG SUY LUẬN ĐA TÁC TỬ
+              </div>
               <h1>Hoạt động agent</h1>
               <p id="activity-run">Chưa có phiên nghiên cứu.</p>
             </div>
@@ -478,11 +655,55 @@ Hạn chế được tác giả nêu"
                 aria-live="polite"
               ></div>
             </section>
-            <div
-              id="trace-content"
-              class="trace-content"
-              aria-label="Nhật ký hoạt động"
-            ></div>
+            <div class="activity-detail-layout">
+              <div class="trace-column">
+                <div class="trace-heading">
+                  <span>NHẬT KÝ THỰC THI</span
+                  ><span id="trace-count" class="count">0 sự kiện</span>
+                </div>
+                <div id="activity-empty" class="lab-empty">
+                  <svg><use href="#i-spark" /></svg>
+                  <h3>Sẵn sàng cùng bạn khám phá</h3>
+                  <p>
+                    Đặt câu hỏi ở trang Nghiên cứu để theo dõi từng bước xử lý
+                    tại đây.
+                  </p>
+                </div>
+                <div
+                  id="trace-content"
+                  class="trace-content"
+                  aria-label="Nhật ký hoạt động"
+                ></div>
+              </div>
+              <aside class="activity-inspector">
+                <article class="guide-card">
+                  <div class="guide-heading">
+                    <svg><use href="#i-stack" /></svg>
+                    <h3>Phạm vi phiên nghiên cứu</h3>
+                  </div>
+                  <p id="activity-sources">Chưa có phiên nghiên cứu.</p>
+                  <div class="inspector-rule"></div>
+                  <p>
+                    Phạm vi được lưu khi bắt đầu phiên. Mở từng sự kiện để xem
+                    nguồn và quyết định của agent.
+                  </p>
+                </article>
+                <article class="guide-card">
+                  <div class="guide-heading">
+                    <svg><use href="#i-shield" /></svg>
+                    <h3>Đọc kết quả có cơ sở</h3>
+                  </div>
+                  <p>
+                    Mức hỗ trợ của từng nhận định được hiển thị trong báo cáo.
+                    Nhấn vào trích dẫn để đọc đoạn nguồn và ngữ cảnh.
+                  </p>
+                  <span class="verified-note"
+                    ><svg><use href="#i-check" /></svg> Bằng chứng có thể truy
+                    vết</span
+                  >
+                </article>
+              </aside>
+            </div>
           </section>
           <section id="view-library" class="view" hidden>
             <div class="simple-heading">
@@ -490,7 +711,44 @@ Hạn chế được tác giả nêu"
               <h1>Kho tài liệu</h1>
               <p>Nguồn tri thức cho các phiên nghiên cứu của bạn.</p>
             </div>
+            <div class="library-overview" aria-label="Tổng quan kho tài liệu">
+              <article>
+                <span class="overview-icon"
+                  ><svg><use href="#i-stack" /></svg
+                ></span>
+                <div>
+                  <strong id="library-total">0</strong
+                  ><span>Tài liệu trong kho</span>
+                </div>
+              </article>
+              <article>
+                <span class="overview-icon violet"
+                  ><svg><use href="#i-file" /></svg
+                ></span>
+                <div>
+                  <strong id="library-chunks">0</strong
+                  ><span>Đoạn có thể truy xuất</span>
+                </div>
+              </article>
+              <article>
+                <span class="overview-icon amber"
+                  ><svg><use href="#i-check" /></svg
+                ></span>
+                <div>
+                  <strong id="library-selected">0</strong
+                  ><span>Nguồn đang được chọn</span>
+                </div>
+              </article>
+            </div>
             <div class="library-tools">
+              <label class="search-field library-search"
+                ><svg><use href="#i-search" /></svg
+                ><input
+                  type="search"
+                  id="library-search"
+                  placeholder="Tìm tên tài liệu…"
+                  aria-label="Tìm trong kho tài liệu"
+              /></label>
               <button class="primary-button" id="library-upload">
                 <svg><use href="#i-upload" /></svg>Tải tài liệu</button
               ><button class="secondary-button" id="library-seed">
@@ -499,9 +757,6 @@ Hạn chế được tác giả nêu"
                 <svg><use href="#i-stack" /></svg>Reindex embedding
               </button>
             </div>
-            <button class="secondary-button" id="rebuild-button">
-              Chia lại đoạn & tạo lại chỉ mục
-            </button>
             <div class="document-table-wrap">
               <table class="document-table">
                 <thead>
@@ -520,6 +775,18 @@ Hạn chế được tác giả nêu"
               DOCX, TXT và Markdown được dẫn theo đoạn văn bản; hệ thống không
               suy đoán số trang.
             </p>
+            <details class="library-maintenance">
+              <summary>
+                <svg><use href="#i-settings" /></svg> Quản lý chỉ mục
+                <span>Dành cho thay đổi cấu hình truy xuất</span>
+              </summary>
+              <div>
+                <p>Tạo lại chỉ mục sau khi đổi mô hình hoặc cách chia đoạn.</p>
+                <button class="secondary-button" id="rebuild-button">
+                  Chia lại đoạn & tạo lại chỉ mục
+                </button>
+              </div>
+            </details>
           </section>
           <section id="view-experiments" class="view" hidden>
             <div class="simple-heading">
@@ -638,18 +905,26 @@ Hạn chế được tác giả nêu"
         <button class="primary-button close-dialog">Xong</button>
       </div>
     </dialog>
-    <dialog id="settings-dialog">
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
       <div class="dialog-heading">
         <div>
-          <span class="eyebrow">MODEL CONNECTION</span>
-          <h2>Cấu hình mô hình</h2>
+          <span class="eyebrow">HẠ TẦNG NGHIÊN CỨU</span>
+          <h2 id="settings-title">Cấu hình mô hình & định tuyến</h2>
         </div>
         <button class="icon-button close-dialog" aria-label="Đóng">
           <svg><use href="#i-close" /></svg>
         </button>
       </div>
       <div id="settings-summary" class="settings-summary"></div>
-      <h3 class="dialog-subheading">Model theo từng vai trò</h3>
+      <div class="routing-heading">
+        <span class="guide-icon"
+          ><svg><use href="#i-spark" /></svg
+        ></span>
+        <div>
+          <h3 class="dialog-subheading">Ma trận định tuyến tác tử</h3>
+          <p>Mô hình và phương thức thực thi cho từng bước nghiên cứu.</p>
+        </div>
+      </div>
       <div id="agent-routes" class="route-list"></div>
       <div id="diagnostics" class="diagnostics"></div>
       <button id="clear-cache" class="secondary-button">

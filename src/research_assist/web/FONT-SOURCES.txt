@@ -1,0 +1,24 @@
+Research Desk bundled fonts
+===========================
+
+These variable fonts include Vietnamese precomposed characters and combining
+marks. They are served from the application's own /assets/ endpoint; the UI
+does not request fonts from Google Fonts or another external font service.
+
+Newsreader, by Production Type
+Source: https://github.com/google/fonts/tree/main/ofl/newsreader
+Original: Newsreader[opsz,wght].ttf
+License: newsreader-OFL.txt
+
+Noto Sans, by the Noto Project Authors
+Source: https://github.com/google/fonts/tree/main/ofl/notosans
+Original: NotoSans[wdth,wght].ttf
+License: noto-sans-OFL.txt
+
+JetBrains Mono, by JetBrains
+Source: https://github.com/google/fonts/tree/main/ofl/jetbrainsmono
+Original: JetBrainsMono[wght].ttf
+License: jetbrains-mono-OFL.txt
+
+The complete TrueType fonts were losslessly repackaged as WOFF containers
+with fontTools. No glyphs were removed. Downloaded 2026-10-19.
