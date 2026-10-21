@@ -83,6 +83,10 @@ class LocalEmbeddings:
         self._model: Any = None
         self._lock = asyncio.Lock()
 
+    @property
+    def model_loaded(self) -> bool:
+        return self._model is not None
+
     async def embed(self, texts: list[str], *, query: bool = False) -> list[list[float]]:
         if not texts:
             return []
