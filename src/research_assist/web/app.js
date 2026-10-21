@@ -1,4 +1,4 @@
-import { api } from "./api.js";
+import { api, uploadDocument } from "./api.js";
 import { $, $$, el, icon, dateLabel, statuses, toast } from "./dom.js";
 import { renderEvents, renderResult, selectTab, copyReport } from "./report.js";
 import { renderBenchmark, renderRoutes } from "./lab.js";
@@ -422,55 +422,363 @@ async function cancelResearch() {
   }
 }
 
+let currentUpload = null;
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  const unit = bytes < 1024 * 1024 ? "KB" : "MB";
+  const size = unit === "KB" ? bytes / 1024 : bytes / (1024 * 1024);
+  return `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 }).format(size)} ${unit}`;
+}
+
+function formatDuration(seconds) {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(whole / 60)).padStart(2, "0")}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+function formatEmbeddingRate(rate) {
+  const amount = rate < 1 ? rate * 60 : rate;
+  const unit = rate < 1 ? "đoạn/phút" : "đoạn/giây";
+  return `${new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 1 }).format(amount)} ${unit}`;
+}
+
+function newUploadId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const hex = [...bytes]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function renderUploadProgress(view) {
+  if (!view) return;
+  const panel = $("#upload-status");
+  panel.hidden = false;
+  panel.dataset.phase = view.phase;
+  $("#upload-title").textContent =
+    view.phase === "uploading"
+      ? "Đang tải tài liệu"
+      : view.phase === "processing"
+        ? "Đang xử lý tài liệu"
+        : view.phase === "error"
+          ? "Tải tài liệu chưa hoàn tất"
+          : "Đã hoàn tất";
+  $("#upload-count").textContent = `${view.index}/${view.total}`;
+  $("#upload-filename").textContent = view.file?.name || "";
+  $("#upload-size").textContent = view.file
+    ? formatBytes(view.file.size)
+    : `${view.total} tệp · ${formatBytes(view.batchBytes)}`;
+  const server = view.server || {};
+  const facts = [];
+  if (server.pages) facts.push(`${server.pages} trang PDF`);
+  if (server.text_chars)
+    facts.push(`${server.text_chars.toLocaleString("vi-VN")} ký tự`);
+  if (server.chunks) facts.push(`${server.chunks} đoạn`);
+  $("#upload-input-details").textContent = facts.length
+    ? facts.join(" · ")
+    : view.phase === "uploading"
+      ? "Đang nhận tài liệu"
+      : view.phase === "processing"
+        ? "Đang phân tích đầu vào"
+        : "Đã xử lý danh sách tệp";
+
+  const progress = $("#upload-progress");
+  progress.parentElement.hidden =
+    view.phase === "complete" || view.phase === "error";
+  if (view.phase === "uploading") {
+    progress.value = view.percent;
+    progress.setAttribute("aria-label", "Tiến độ truyền tài liệu");
+    $("#upload-percent").textContent = `${view.percent}%`;
+    panel.dataset.progressMode = "determinate";
+  } else if (
+    view.phase === "processing" &&
+    server.embedding_percent !== null &&
+    server.embedding_percent !== undefined
+  ) {
+    progress.value = server.embedding_percent;
+    progress.setAttribute(
+      "aria-label",
+      "Tiến độ tạo vector cho các đoạn văn bản",
+    );
+    $("#upload-percent").textContent = `${server.embedding_percent}%`;
+    panel.dataset.progressMode = "determinate";
+  } else if (view.phase === "processing") {
+    progress.removeAttribute("value");
+    $("#upload-percent").textContent = "";
+    panel.dataset.progressMode = "indeterminate";
+  } else {
+    $("#upload-percent").textContent = "";
+    panel.dataset.progressMode = "none";
+  }
+  const stageText = {
+    reading: "Đang đọc tệp…",
+    waiting: "Đang chờ lượt xử lý tài liệu…",
+    extracting: "Đang đọc tài liệu và trích xuất văn bản…",
+    chunking: "Đang chia văn bản thành các đoạn…",
+    embedding: server.model_loading
+      ? "Đang nạp mô hình embedding lần đầu. Thời gian có thể lâu hơn…"
+      : server.chunks
+        ? `Đang tạo vector ${server.embedded || 0}/${server.chunks} đoạn…`
+        : "Đang tạo vector cho tài liệu…",
+    saving: "Đang lưu tài liệu và chỉ mục…",
+    completed: "Đã lập chỉ mục. Đang nhận kết quả…",
+  };
+  $("#upload-message").textContent =
+    view.message ||
+    (view.phase === "uploading"
+      ? "Đang truyền tệp lên máy chủ…"
+      : stageText[server.stage] || "Đã truyền xong. Đang phân tích tài liệu…");
+  $("#upload-transferred").textContent =
+    `${formatBytes(view.bytes)} / ${formatBytes(view.file?.size ?? view.batchBytes)}`;
+  $("#upload-work").textContent = server.chunks
+    ? server.stage === "embedding"
+      ? `${server.embedded || 0}/${server.chunks} đoạn`
+      : `${server.chunks} đoạn đã tạo`
+    : server.pages
+      ? `${server.pages} trang đã đọc`
+      : view.work || "Chưa xác định";
+  const elapsed = Math.max(
+    ((view.finishedAt || Date.now()) - view.startedAt) / 1000,
+    server.elapsed_seconds || 0,
+  );
+  $("#upload-elapsed").textContent = formatDuration(elapsed);
+  $("#upload-speed").textContent =
+    view.phase === "uploading" && view.bytes > 0 && elapsed > 0.5
+      ? `Tốc độ truyền: ${formatBytes(view.bytes / elapsed)}/giây`
+      : view.phase === "processing" && server.embedding_rate
+        ? `Tốc độ lập chỉ mục: ${formatEmbeddingRate(server.embedding_rate)}`
+        : "";
+  let remaining = "Đang tính";
+  if (view.phase === "uploading" && view.bytes > 0 && elapsed > 0.5) {
+    const seconds = ((view.file.size - view.bytes) * elapsed) / view.bytes;
+    remaining = seconds < 1 ? "< 1 giây" : `~${formatDuration(seconds)}`;
+  } else if (
+    view.phase === "processing" &&
+    server.remaining_seconds !== null &&
+    server.remaining_seconds !== undefined
+  ) {
+    remaining =
+      server.remaining_seconds < 1
+        ? "< 1 giây"
+        : `~${formatDuration(server.remaining_seconds)}`;
+  } else if (view.phase === "complete" || view.phase === "error") {
+    remaining = "—";
+  }
+  $("#upload-remaining").textContent = remaining;
+  const step =
+    view.phase === "uploading"
+      ? 0
+      : view.phase === "error" && !server.stage
+        ? 0
+        : ["reading", "waiting", "extracting"].includes(server.stage)
+          ? 1
+          : server.stage === "chunking"
+            ? 2
+            : 3;
+  ["transfer", "extract", "chunk", "index"].forEach((name, index) => {
+    const item = $(`#upload-step-${name}`);
+    item.dataset.state =
+      view.phase === "complete"
+        ? "done"
+        : view.phase === "error" && index === step
+          ? "error"
+          : index < step
+            ? "done"
+            : index === step
+              ? "active"
+              : "pending";
+  });
+  $("#upload-close").hidden =
+    view.phase === "uploading" || view.phase === "processing";
+}
+
+function monitorUpload(uploadId, view) {
+  let stopped = false;
+  let timer;
+  async function poll() {
+    try {
+      const progress = await api(`/uploads/${uploadId}`);
+      if (!stopped && currentUpload === view) {
+        view.server = progress;
+        renderUploadProgress(view);
+      }
+    } catch (error) {
+      if (error.status === 401) stopped = true;
+      // The first poll can arrive before the upload handler registers its ID.
+    }
+    if (!stopped) timer = setTimeout(poll, 600);
+  }
+  poll();
+  return () => {
+    stopped = true;
+    clearTimeout(timer);
+  };
+}
+
+function setUploadBusy(value) {
+  state.uploading = value;
+  for (const id of [
+    "sidebar-upload",
+    "library-upload",
+    "dropzone",
+    "seed-button",
+    "library-seed",
+  ]) {
+    $(`#${id}`).disabled = value;
+  }
+}
+
 async function uploadFiles(files) {
+  if (!files.length) return;
   if (state.uploading) {
-    toast("Đang lập chỉ mục. Hãy chờ tải lên hoàn thành.");
+    toast("Đang tải tài liệu. Hãy chờ thao tác hiện tại hoàn thành.");
     return;
   }
-  state.uploading = true;
+  setUploadBusy(true);
   const accepted = ["pdf", "docx", "txt", "md"];
-  $("#connection-label").textContent = "Đang lập chỉ mục tài liệu…";
+  let added = 0;
+  let duplicates = 0;
+  let failed = 0;
+  let lastError = "";
+  let sentBytes = 0;
+  const batchBytes = files.reduce((sum, file) => sum + file.size, 0);
+  const batchStartedAt = Date.now();
+  const ticker = setInterval(() => renderUploadProgress(currentUpload), 1000);
+  $("#connection-label").textContent = "Đang tải tài liệu…";
   try {
-    for (const file of files) {
+    for (const [offset, file] of files.entries()) {
+      const view = {
+        file,
+        index: offset + 1,
+        total: files.length,
+        batchBytes,
+        startedAt: Date.now(),
+        bytes: 0,
+        percent: 0,
+        phase: "uploading",
+        server: null,
+      };
+      currentUpload = view;
+      renderUploadProgress(view);
+      $("#connection-label").textContent = "Đang tải tài liệu…";
       if (!accepted.includes(file.name.split(".").at(-1).toLowerCase())) {
-        toast(`Không hỗ trợ ${file.name}.`, true);
+        failed++;
+        lastError = `Không hỗ trợ ${file.name}.`;
+        view.phase = "error";
+        view.message = lastError;
+        view.finishedAt = Date.now();
+        renderUploadProgress(view);
+        toast(lastError, true);
         continue;
       }
       if (file.size > (state.config?.max_upload_mb || 12) * 1024 * 1024) {
-        toast(`${file.name} vượt giới hạn dung lượng.`, true);
+        failed++;
+        lastError = `${file.name} vượt giới hạn dung lượng.`;
+        view.phase = "error";
+        view.message = lastError;
+        view.finishedAt = Date.now();
+        renderUploadProgress(view);
+        toast(lastError, true);
         continue;
       }
-      const form = new FormData();
-      form.append("file", file);
+      const uploadId = newUploadId();
+      let stopMonitor = () => {};
       try {
-        const result = await api("/documents", { method: "POST", body: form });
+        const result = await uploadDocument(file, {
+          uploadId,
+          onProgress: ({ percent, loaded }) => {
+            view.percent = percent;
+            view.bytes = loaded;
+            renderUploadProgress(view);
+          },
+          onTransferred: () => {
+            if (view.phase !== "uploading") return;
+            view.bytes = file.size;
+            view.phase = "processing";
+            renderUploadProgress(view);
+            $("#connection-label").textContent = "Đang lập chỉ mục tài liệu…";
+            stopMonitor = monitorUpload(uploadId, view);
+          },
+        });
+        view.bytes = file.size;
+        try {
+          view.server = await api(`/uploads/${uploadId}`);
+        } catch {
+          view.server = {
+            stage: "completed",
+            chunks: result.document.chunk_count,
+            pages: result.document.page_count,
+          };
+        }
+        view.phase = "complete";
+        view.finishedAt = Date.now();
+        view.message = result.duplicate
+          ? "Tài liệu đã có trong kho."
+          : `Đã lập chỉ mục ${result.document.chunk_count} đoạn.`;
+        renderUploadProgress(view);
+        if (result.duplicate) duplicates++;
+        else added++;
         if (result.document.warnings?.length)
           toast(result.document.warnings[0], true);
-        toast(
-          result.duplicate
-            ? `${file.name}: đã có trong kho.`
-            : `${file.name}: đã lập chỉ mục ${result.document.chunk_count} đoạn.`,
-        );
         if (!state.working) {
           state.selected.add(result.document.id);
           state.scopeMode = "selected";
         }
-        await refreshDocuments();
+        try {
+          await refreshDocuments();
+        } catch (error) {
+          toast(
+            `Tài liệu đã lưu nhưng chưa làm mới được danh sách: ${error.message}`,
+            true,
+          );
+        }
       } catch (error) {
-        toast(`${file.name}: ${error.message}`, true);
+        failed++;
+        lastError = `${file.name}: ${error.message}`;
+        view.phase = "error";
+        view.message = lastError;
+        view.finishedAt = Date.now();
+        renderUploadProgress(view);
+        toast(lastError, true);
+      } finally {
+        sentBytes += view.bytes;
+        stopMonitor();
       }
     }
   } finally {
-    state.uploading = false;
+    clearInterval(ticker);
+    const parts = [];
+    if (added) parts.push(`Đã thêm ${added} tài liệu`);
+    if (duplicates) parts.push(`${duplicates} tài liệu đã có`);
+    if (failed) parts.push(`${failed} tệp lỗi`);
+    currentUpload = {
+      phase: failed && !added && !duplicates ? "error" : "complete",
+      index: files.length,
+      total: files.length,
+      file: null,
+      batchBytes,
+      bytes: sentBytes,
+      startedAt: batchStartedAt,
+      finishedAt: Date.now(),
+      work: `${added}/${files.length} tài liệu đã thêm`,
+      message:
+        failed === 1 && files.length === 1
+          ? lastError
+          : `${parts.join(" · ")}.`,
+    };
+    renderUploadProgress(currentUpload);
+    setUploadBusy(false);
     $("#connection-label").textContent = "Backend đã kết nối";
     $("#file-input").value = "";
   }
 }
 
-async function seedDocuments(button) {
+async function seedDocuments() {
   if (state.uploading) return;
-  state.uploading = true;
-  button.disabled = true;
+  setUploadBusy(true);
   $("#connection-label").textContent = "Đang nạp tài liệu mẫu…";
   try {
     const seeded = await api("/documents/demo", { method: "POST" });
@@ -483,8 +791,7 @@ async function seedDocuments(button) {
   } catch (error) {
     toast(error.message, true);
   } finally {
-    state.uploading = false;
-    button.disabled = false;
+    setUploadBusy(false);
     $("#connection-label").textContent = "Backend đã kết nối";
   }
 }
@@ -584,10 +891,11 @@ $$(".main-nav .nav-item").forEach((button) =>
 $("#file-input").addEventListener("change", (event) =>
   uploadFiles([...event.target.files]),
 );
+$("#upload-close").addEventListener("click", () => {
+  $("#upload-status").hidden = true;
+});
 ["seed-button", "library-seed"].forEach((id) =>
-  $(`#${id}`).addEventListener("click", (event) =>
-    seedDocuments(event.currentTarget),
-  ),
+  $(`#${id}`).addEventListener("click", seedDocuments),
 );
 $("#reindex-button").addEventListener("click", async (event) => {
   const button = event.currentTarget;
