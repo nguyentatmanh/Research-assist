@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-AgentRole = Literal["retrieval", "reader", "summarizer", "fact_checker", "writer"]
+AgentRole = Literal["retrieval", "reader", "summarizer", "fact_checker", "writer", "supervisor"]
 Provider = Literal["demo", "gemini", "openai", "ollama", "deepseek"]
 
 
@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     llm_provider: Provider = "demo"
     llm_model: str = ""  # Provider-specific defaults; override to use a tuned model.
     workflow_profile: Literal["balanced", "academic"] = "balanced"
+    orchestration_mode: Literal["fixed", "adaptive", "autonomous"] = "autonomous"
+    supervisor_max_steps: int = Field(default=4, ge=1, le=8)
+    agent_max_steps: int = Field(default=6, ge=1, le=16)
+    autonomous_max_steps: int = Field(default=16, ge=1, le=32)
+    autonomous_max_tasks: int = Field(default=16, ge=1, le=32)
     agent_routes: dict[AgentRole, AgentRoute] = Field(default_factory=dict)
     gemini_api_key: SecretStr = SecretStr("")
     openai_api_key: SecretStr = SecretStr("")
