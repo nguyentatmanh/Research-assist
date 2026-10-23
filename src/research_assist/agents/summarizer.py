@@ -1,7 +1,14 @@
 from hashlib import sha256
 
 from research_assist.agents.prompts.summarizer import INSTRUCTION
-from research_assist.domain.models import Claim, Evidence, RawClaim, Requirement, SynthesisOutput
+from research_assist.domain.models import (
+    Claim,
+    Evidence,
+    FollowUpRequest,
+    RawClaim,
+    Requirement,
+    SynthesisOutput,
+)
 from research_assist.domain.ports import LanguageModel
 
 
@@ -17,6 +24,7 @@ class SummarizerAgent:
         evidence: list[Evidence],
         language: str,
         requirements: list[Requirement] | None = None,
+        requests: list[FollowUpRequest] | None = None,
     ) -> tuple[list[Claim], list[str], list[str]]:
         if not evidence:
             return [], [], []
@@ -28,6 +36,7 @@ class SummarizerAgent:
                 "language": language,
                 "requirements": [r.model_dump() for r in (requirements or [])],
                 "evidence": [e.model_dump() for e in evidence],
+                "revision_requests": [r.model_dump() for r in (requests or [])],
             },
             schema=SynthesisOutput,
             fallback=lambda: SynthesisOutput(
@@ -39,6 +48,14 @@ class SummarizerAgent:
                 gaps=[],
             ),
         )
+        return self.validate_output(output, evidence, requirements)
+
+    def validate_output(
+        self,
+        output: SynthesisOutput,
+        evidence: list[Evidence],
+        requirements: list[Requirement] | None = None,
+    ) -> tuple[list[Claim], list[str], list[str]]:
         valid_ids = {e.id for e in evidence}
         claims, rejected, seen = [], 0, set()
         for raw in output.claims:

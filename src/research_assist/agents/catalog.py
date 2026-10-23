@@ -22,12 +22,13 @@ SPECS = (
         ("RetrievalPlan", "RetrievedChunk[]"),
         (
             "Phân rã câu hỏi một lần",
+            "Tự chọn query, quan sát và đổi chiến lược",
             "Truy xuất theo từng ý",
             "BM25 + cosine + RRF",
             "Rerank theo truy vấn",
             "Phân bổ Top K + mở rộng ngữ cảnh",
         ),
-        ("LanguageModel", "SearchTool", "Reranker"),
+        ("LanguageModel", "SearchTool", "Reranker", "search", "inspect_sources"),
         "Luôn giữ phạm vi tài liệu đã chọn.",
     ),
     AgentSpec(
@@ -41,7 +42,7 @@ SPECS = (
             "Khôi phục trích dẫn trên server",
             "Kiểm tra ID/offset và khử trùng",
         ),
-        ("LanguageModel",),
+        ("LanguageModel", "read_units", "read_context", "read_section", "request_task"),
         "Loại quote không tồn tại và chunk_id lạ.",
     ),
     AgentSpec(
@@ -50,21 +51,21 @@ SPECS = (
         ("question", "Evidence[]", "language"),
         ("Claim[]", "gaps", "warnings"),
         ("Tổng hợp", "Kiểm tra evidence ID", "Khử trùng", "Gắn claim ID"),
-        ("LanguageModel",),
+        ("LanguageModel", "inspect_evidence", "inspect_claims", "request_task"),
         "Không thêm nhận định để đủ số lượng; giữ phạm vi nguồn.",
     ),
     AgentSpec(
         "fact_checker",
         "Kiểm chứng nhận định và độ đầy đủ",
         ("Claim[]", "Evidence[]", "Requirement[]"),
-        ("ClaimCheck[]", "CoverageCheck[]"),
+        ("ClaimCheck[]", "CoverageCheck[]", "FollowUpRequest[]"),
         (
             "Đánh giá từng claim và ý",
             "Đánh giá khoảng trống",
             "Kiểm tra ID/số",
             "Đối chiếu coverage với gaps",
         ),
-        ("LanguageModel",),
+        ("LanguageModel", "inspect_evidence", "inspect_claims", "check_numbers", "request_task"),
         "Thiếu hoặc trùng kết quả: insufficient/unassessed.",
     ),
     AgentSpec(
@@ -73,7 +74,7 @@ SPECS = (
         ("Claim[]", "ClaimCheck[]", "Evidence[]"),
         ("WrittenReport",),
         ("Kiểm tra lại claim", "Chọn và sắp xếp", "Heading trung lập", "Dựng trích dẫn"),
-        ("LanguageModel",),
+        ("LanguageModel", "inspect_claims", "inspect_progress", "request_task"),
         "Chỉ xuất claim đã được hỗ trợ; không sửa nội dung sau kiểm chứng.",
     ),
 )

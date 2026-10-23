@@ -50,6 +50,9 @@ class WriterAgent:
         evidence: list[Evidence],
         gaps: list[str],
         gap_details: list[EvidenceGap] | None = None,
+        *,
+        deterministic: bool = False,
+        layout: WriterOutput | None = None,
     ) -> WrittenReport:
         checks = validate_checks(claims, evidence, checks)
         supported = {check.claim_id: check for check in checks if check.verdict == "supported"}
@@ -65,23 +68,31 @@ class WriterAgent:
                 "Hãy tải thêm tài liệu liên quan hoặc thu hẹp câu hỏi."
             )
             return WrittenReport(title=title, markdown=f"# {title}\n\n{message}\n")
-        output = await self.llm.generate(
-            task="write_report",
-            instruction=(INSTRUCTION),
-            payload={
-                "question": request.question,
-                "language": request.language,
-                "style": request.style,
-                "requirements": request.requirements,
-                "verified_claims": [c.model_dump() for c in verified],
-            },
-            schema=WriterOutput,
-            fallback=lambda: WriterOutput(
-                title=("Research notes" if en else "Ghi chú nghiên cứu")
-                + ": "
-                + request.question[:140],
-                sections=self._sections(verified, request),
-            ),
+        local_output = WriterOutput(
+            title=("Research notes" if en else "Ghi chú nghiên cứu"),
+            sections=self._sections(verified, request),
+        )
+        output = (
+            layout or local_output
+            if deterministic or layout is not None
+            else await self.llm.generate(
+                task="write_report",
+                instruction=(INSTRUCTION),
+                payload={
+                    "question": request.question,
+                    "language": request.language,
+                    "style": request.style,
+                    "requirements": request.requirements,
+                    "verified_claims": [c.model_dump() for c in verified],
+                },
+                schema=WriterOutput,
+                fallback=lambda: WriterOutput(
+                    title=("Research notes" if en else "Ghi chú nghiên cứu")
+                    + ": "
+                    + request.question[:140],
+                    sections=self._sections(verified, request),
+                ),
+            )
         )
         lookup = {c.id: c for c in verified}
         ev_lookup = {e.id: e for e in evidence}

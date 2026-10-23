@@ -215,6 +215,33 @@ class HybridSearch:
             expanded.append(chunk.model_copy(update={"text": text, "start": start, "end": end}))
         return expanded
 
+    async def read_section(
+        self,
+        seeds: list[RetrievedChunk],
+        document_ids: list[str],
+    ) -> list[RetrievedChunk]:
+        """Read up to six indexed windows anchored to a known section in this scope."""
+        snapshot = await self._snapshot(document_ids, False)
+        indexed = {c.id: c for c in snapshot.chunks}
+        selected: dict[str, RetrievedChunk] = {}
+        for seed in seeds:
+            anchor = indexed.get(seed.id)
+            if anchor is None or anchor.document_id != seed.document_id:
+                raise ProviderError("Không tìm thấy đoạn nguồn trong phạm vi đã chọn.")
+            related = sorted(
+                (
+                    c
+                    for c in snapshot.chunks
+                    if c.document_id == anchor.document_id and c.section == anchor.section
+                ),
+                key=lambda c: (abs(c.ordinal - anchor.ordinal), c.ordinal),
+            )[:6]
+            for chunk in related:
+                selected.setdefault(chunk.id, chunk_view(chunk, score=seed.score))
+                if len(selected) >= 12:
+                    return list(selected.values())
+        return list(selected.values())
+
     def _rank(
         self,
         queries: list[str],
