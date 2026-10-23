@@ -210,7 +210,7 @@ class AgentTask(FollowUpRequest):
     attempts: int = Field(default=0, ge=0)
 
 
-class SupervisorDecision(Contract):
+class CoordinationDecision(Contract):
     action: Literal["retrieve", "read_context", "revise", "verify", "finish"]
     task_ids: list[str] = Field(default_factory=list, max_length=4)
     reason: str = Field(min_length=8, max_length=700)
@@ -259,8 +259,12 @@ class WriterOutput(Contract):
     sections: list[ReportSection] = Field(default_factory=list, max_length=13)
 
 
-RuntimeRole = Literal["supervisor", "retrieval", "reader", "summarizer", "fact_checker", "writer"]
 WorkerRole = Literal["retrieval", "reader", "summarizer", "fact_checker", "writer"]
+RuntimeRole = WorkerRole
+# Request provenance also records code scheduling and retired historical roles.
+TaskRequester = Literal[
+    "retrieval", "reader", "summarizer", "fact_checker", "writer", "orchestrator", "supervisor"
+]
 TaskStatus = Literal["pending", "running", "waiting", "completed", "blocked", "cancelled"]
 
 
@@ -275,7 +279,7 @@ class TaskRequest(Contract):
 
 class RuntimeTask(TaskRequest):
     id: str
-    requested_by: RuntimeRole = "supervisor"
+    requested_by: TaskRequester = "orchestrator"
     parent_id: str | None = None
     status: TaskStatus = "pending"
     message: str = ""
@@ -283,7 +287,7 @@ class RuntimeTask(TaskRequest):
 
 class ToolArguments(Contract):
     queries: list[str] = Field(default_factory=list, max_length=4)
-    search_mode: Literal["lexical", "hybrid"] = "hybrid"
+    search_mode: Literal["lexical", "hybrid"] | None = None
     chunk_ids: list[str] = Field(default_factory=list, max_length=12)
     evidence_ids: list[str] = Field(default_factory=list, max_length=24)
     claim_ids: list[str] = Field(default_factory=list, max_length=16)
@@ -304,7 +308,7 @@ OutputT = TypeVar("OutputT", bound=BaseModel)
 class AgentDecision(Contract, Generic[OutputT]):
     action: Literal["use_tool", "request_task", "finish", "blocked"]
     tool: str | None = Field(default=None, max_length=60)
-    arguments: ToolArguments = Field(default_factory=ToolArguments)
+    arguments: ToolArguments | None = None
     result: OutputT | None = None
     reason: str = Field(min_length=8, max_length=500)
 
@@ -313,13 +317,10 @@ class SearchCompletion(Contract):
     chunk_ids: list[str] = Field(default_factory=list, max_length=12)
 
 
-class ResearchConclusion(Contract):
-    summary: str = Field(min_length=8, max_length=500)
-
-
 class AgentSession(Contract):
     task_id: str
-    role: RuntimeRole
+    # Accept old persisted sessions without making Supervisor an executable role.
+    role: RuntimeRole | Literal["supervisor"]
     steps: int = Field(default=0, ge=0)
     status: TaskStatus = "pending"
     observations: list[dict[str, object]] = Field(default_factory=list)
@@ -341,6 +342,7 @@ class AgentUsage(Contract):
     agent: str
     provider: str
     model: str
+    models_used: list[str] = Field(default_factory=list)
     execution: Literal["local", "api", "demo"]
     calls: int = 0
     cache_hits: int = 0

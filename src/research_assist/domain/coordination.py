@@ -5,11 +5,11 @@ from hashlib import sha256
 from research_assist.domain.models import (
     AgentTask,
     Claim,
+    CoordinationDecision,
     CoverageCheck,
     Evidence,
     FollowUpRequest,
     Requirement,
-    SupervisorDecision,
 )
 
 ASSIGNEES = {
@@ -81,7 +81,9 @@ def make_task(request: FollowUpRequest) -> AgentTask:
     )
 
 
-def selected_tasks(decision: SupervisorDecision, tasks: list[AgentTask]) -> list[AgentTask] | None:
+def selected_tasks(
+    decision: CoordinationDecision, tasks: list[AgentTask]
+) -> list[AgentTask] | None:
     """None is an invalid dispatch; an empty list is a valid explicit finish."""
     if decision.action == "finish":
         return [] if not decision.task_ids else None
