@@ -11,7 +11,8 @@ from research_assist.domain.ports import T
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    return Settings(data_dir=tmp_path, _env_file=None)
+    # Existing fixtures exercise the fixed baseline; adaptive tests opt in explicitly.
+    return Settings(data_dir=tmp_path, orchestration_mode="fixed", _env_file=None)
 
 
 @pytest.fixture

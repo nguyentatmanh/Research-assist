@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import random
 import re
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -16,7 +18,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from research_assist.config import Settings
-from research_assist.domain.errors import ProviderError
+from research_assist.domain.errors import BudgetExceeded, ProviderError, ProviderUnavailable
 from research_assist.domain.json_output import parse_object
 from research_assist.domain.models import AgentUsage
 from research_assist.domain.ports import T
@@ -32,14 +34,30 @@ class Usage:
     profile: str | None = None
     cache_allowed: bool = True
     missing_usage: int = 0
+    orchestration_mode: str | None = None
+    provider_events: list[dict[str, object]] = field(default_factory=list)
+    unavailable_models: set[tuple[str, str]] = field(default_factory=set)
 
 
 current_usage: ContextVar[Usage | None] = ContextVar("research_usage", default=None)
 
 
+def provider_event(task: str, kind: str, **details: object) -> None:
+    """Safe retry metadata only: never response bodies, source text, keys or headers."""
+    usage = current_usage.get()
+    if usage is not None:
+        usage.provider_events.append({"task": task, "kind": kind, **details})
+
+
 @contextmanager
-def usage_scope(profile: str | None = None, cache_enabled: bool = True) -> Iterator[Usage]:
-    usage = Usage(profile=profile, cache_allowed=cache_enabled)
+def usage_scope(
+    profile: str | None = None,
+    cache_enabled: bool = True,
+    orchestration_mode: str | None = None,
+) -> Iterator[Usage]:
+    usage = Usage(
+        profile=profile, cache_allowed=cache_enabled, orchestration_mode=orchestration_mode
+    )
     token = current_usage.set(usage)
     try:
         yield usage
@@ -64,6 +82,33 @@ def strict_schema(model: type[BaseModel]) -> dict[str, Any]:
 
     visit(schema)
     return schema
+
+
+def gemini_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Keep wire grammar small; full Pydantic bounds still apply after generation.
+
+    Nested array/numeric bounds can exceed Gemini's constrained-decoding state limit.
+    Instructions retain the original schema, and model_validate rejects invalid output.
+    """
+    bounds = {"minItems", "maxItems", "minimum", "maximum", "minLength", "maxLength"}
+
+    def visit(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {
+                key: (
+                    {name: visit(child) for name, child in value.items()}
+                    if key in {"properties", "$defs", "definitions"} and isinstance(value, dict)
+                    else visit(value)
+                )
+                for key, value in node.items()
+                if key not in bounds
+            }
+        if isinstance(node, list):
+            return [visit(child) for child in node]
+        return node
+
+    result: dict[str, Any] = visit(schema)
+    return result
 
 
 class DemoLanguageModel:
@@ -132,7 +177,17 @@ class HTTPLanguageModel:
                 if len(text) > 200000:
                     raise ValueError("response too large")
                 return schema.model_validate(parse_object(text))
-            except (ValidationError, ValueError):
+            except (ValidationError, ValueError) as exc:
+                provider_event(
+                    task,
+                    "schema_validation_failed",
+                    error_types=(
+                        sorted({e["type"] for e in exc.errors(include_input=False)})
+                        if isinstance(exc, ValidationError)
+                        else ["invalid_json"]
+                    ),
+                    repair=repair,
+                )
                 if repair:
                     raise ProviderError(
                         "Model trả JSON không đúng hợp đồng sau một lần sửa. "
@@ -161,10 +216,12 @@ class HTTPLanguageModel:
             endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_path}:generateContent"
             headers = {"x-goog-api-key": self.settings.gemini_api_key.get_secret_value()}
             generation: dict[str, object] = {
-                "temperature": 0.1,
                 "maxOutputTokens": token_limit,
                 "responseMimeType": "application/json",
             }
+            # Gemini 3 uses provider defaults; 3.6+ ignores custom sampling parameters.
+            if not self.model.removeprefix("models/").startswith(("gemini-3", "gemini-4")):
+                generation["temperature"] = 0.1
             if self.model.removeprefix("models/") in {"gemini-2.5-flash", "gemini-2.5-flash-lite"}:
                 generation["thinkingConfig"] = {
                     "thinkingBudget": self.settings.gemini_thinking_budget
@@ -174,7 +231,7 @@ class HTTPLanguageModel:
                     "thinkingLevel": self.settings.gemini_thinking_level
                 }
             if self.settings.structured_output == "schema":
-                generation["responseJsonSchema"] = schema
+                generation["responseJsonSchema"] = gemini_schema(schema)
             body = {
                 "systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": user}]}],
@@ -221,7 +278,7 @@ class HTTPLanguageModel:
                 body["thinking"] = {
                     "type": "enabled" if self.settings.deepseek_thinking else "disabled"
                 }
-        response = await self._post(endpoint, headers, body)
+        response = await self._post(endpoint, headers, body, task=task)
         try:
             data = response.json()
             usage = current_usage.get()
@@ -250,6 +307,7 @@ class HTTPLanguageModel:
                 if reason == "MAX_TOKENS":
                     # Regenerate once, never accept truncated JSON or bypass the call budget.
                     if allow_token_growth and token_limit < 12000:
+                        provider_event(task, "output_token_growth", previous_limit=token_limit)
                         return await self._complete(
                             system,
                             user,
@@ -312,43 +370,109 @@ class HTTPLanguageModel:
         endpoint: str,
         headers: dict[str, str],
         body: dict[str, Any],
+        *,
+        task: str = "",
     ) -> httpx.Response:
-        for attempt in range(3):
+        attempts = self.settings.llm_retry_attempts
+        for attempt in range(attempts):
             usage = current_usage.get()
             if usage:
                 if usage.calls >= self.settings.llm_max_calls:
-                    raise ProviderError("Đã đạt ngân sách số lần gọi model cho phiên này.")
+                    raise BudgetExceeded("Đã đạt ngân sách số lần gọi model cho phiên này.")
                 if usage.input_tokens + usage.output_tokens >= self.settings.llm_max_total_tokens:
-                    raise ProviderError(
+                    raise BudgetExceeded(
                         "Đã đạt ngân sách token cho phiên này "
                         f"({usage.input_tokens + usage.output_tokens:,}/"
                         f"{self.settings.llm_max_total_tokens:,}); không gọi thêm model."
                     )
             if self.gate is not None:
+                gate_begin = time.perf_counter()
                 await self.gate.acquire()
+                provider_event(
+                    task,
+                    "quota_wait",
+                    elapsed_ms=round((time.perf_counter() - gate_begin) * 1000, 2),
+                )
             if usage:
                 usage.calls += 1
             try:
+                http_begin = time.perf_counter()
                 response = await self.client.post(endpoint, headers=headers, json=body)
-                if response.status_code in {408, 429, 500, 502, 503, 504} and attempt < 2:
-                    await asyncio.sleep(retry_delay(response, attempt))
+                provider_event(
+                    task,
+                    "http_attempt",
+                    status=response.status_code,
+                    provider=self.name,
+                    model=self.model,
+                    attempt=attempt + 1,
+                    call=usage.calls if usage else 0,
+                    elapsed_ms=round((time.perf_counter() - http_begin) * 1000, 2),
+                )
+                if (
+                    response.status_code in {408, 429, 500, 502, 503, 504}
+                    and attempt + 1 < attempts
+                ):
+                    delay = retry_delay(
+                        response, attempt, initial_seconds=self.settings.llm_retry_initial_seconds
+                    )
+                    provider_event(
+                        task,
+                        "retry_scheduled",
+                        provider=self.name,
+                        model=self.model,
+                        status=response.status_code,
+                        attempt=attempt + 1,
+                        delay_seconds=round(delay, 3),
+                    )
+                    await asyncio.sleep(delay)
                     continue
                 if response.status_code >= 400:
-                    raise ProviderError(
-                        f"AI provider trả HTTP {response.status_code}. Kiểm tra key, model, quota "
-                        "và RA_STRUCTURED_OUTPUT; không có báo cáo được tạo."
-                    )
+                    status = response.status_code
+                    if status in {408, 500, 502, 503, 504}:
+                        raise ProviderUnavailable(
+                            f"AI provider trả HTTP {status}: dịch vụ tạm thời không khả dụng "
+                            "hoặc phản hồi quá chậm sau các lần thử lại."
+                        )
+                    hint = {
+                        400: "Kiểm tra tham số model và JSON schema.",
+                        401: "Kiểm tra API key.",
+                        403: "Kiểm tra quyền truy cập của API key và project.",
+                        404: "Kiểm tra tên model và quyền truy cập model.",
+                        429: "Đã chạm hạn mức request/token. Kiểm tra quota trong AI Studio "
+                        "hoặc trang quản lý provider; đợi quota reset nếu hết hạn mức ngày.",
+                    }.get(status, "Kiểm tra cấu hình và trạng thái provider.")
+                    raise ProviderError(f"AI provider trả HTTP {status}. {hint}")
                 return response
-            except (httpx.TimeoutException, httpx.NetworkError):
-                if attempt == 2:
-                    raise ProviderError(
-                        "AI provider không phản hồi. Kiểm tra kết nối hoặc timeout."
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                provider_event(
+                    task,
+                    "network_error",
+                    error_type=type(exc).__name__,
+                    provider=self.name,
+                    model=self.model,
+                    attempt=attempt + 1,
+                    call=usage.calls if usage else 0,
+                )
+                if attempt + 1 == attempts:
+                    raise ProviderUnavailable(
+                        "AI provider không phản hồi sau các lần thử lại. "
+                        "Kiểm tra kết nối hoặc timeout."
                     ) from None
-                await asyncio.sleep(0.5 * 2**attempt)
-        raise ProviderError("AI provider không khả dụng.")
+                delay = backoff_delay(attempt, self.settings.llm_retry_initial_seconds)
+                provider_event(
+                    task,
+                    "retry_scheduled",
+                    provider=self.name,
+                    model=self.model,
+                    error_type=type(exc).__name__,
+                    attempt=attempt + 1,
+                    delay_seconds=round(delay, 3),
+                )
+                await asyncio.sleep(delay)
+        raise ProviderUnavailable("AI provider không khả dụng.")
 
 
-def retry_delay(response: httpx.Response, attempt: int) -> float:
+def retry_delay(response: httpx.Response, attempt: int, *, initial_seconds: float = 2) -> float:
     """Honor bounded Retry-After without waiting indefinitely or exposing headers."""
     value = response.headers.get("Retry-After", "")
     try:
@@ -357,5 +481,10 @@ def retry_delay(response: httpx.Response, attempt: int) -> float:
         try:
             delay = (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds()
         except (ValueError, TypeError, OverflowError):
-            delay = 0.5 * 2**attempt
+            delay = backoff_delay(attempt, initial_seconds)
     return max(0.0, min(delay, 60.0))
+
+
+def backoff_delay(attempt: int, initial_seconds: float = 2) -> float:
+    base = min(60.0, initial_seconds * float(2**attempt))
+    return min(60.0, base + random.uniform(0, base * 0.25))

@@ -2,8 +2,15 @@ import re
 from hashlib import sha256
 
 from research_assist.agents.prompts.reader import INSTRUCTION
-from research_assist.domain.models import Evidence, RawEvidence, ReaderOutput, RetrievedChunk
+from research_assist.domain.models import (
+    Evidence,
+    FollowUpRequest,
+    RawEvidence,
+    ReaderOutput,
+    RetrievedChunk,
+)
 from research_assist.domain.ports import LanguageModel
+from research_assist.domain.provenance import intersect_regions
 from research_assist.domain.source_units import source_units
 from research_assist.domain.text import fold, tokens
 
@@ -51,17 +58,18 @@ class ReaderAgent:
         question: str,
         chunks: list[RetrievedChunk],
         requirements: list[str] | None = None,
+        requests: list[FollowUpRequest] | None = None,
     ) -> tuple[list[Evidence], list[str], list[str]]:
         if not chunks:
             return [], ["Không tìm thấy đoạn tài liệu liên quan đến câu hỏi."], []
         units = source_units(chunks)
-        unit_lookup = {u["unit_id"]: u for u in units}
         raw = await self.llm.generate(
             task="read_evidence",
             instruction=(INSTRUCTION),
             payload={
                 "question": question,
                 "requirements": requirements or [],
+                "reading_requests": [r.model_dump() for r in (requests or [])],
                 "source_units": units,
                 "sources": [
                     {
@@ -77,6 +85,17 @@ class ReaderAgent:
             schema=ReaderOutput,
             fallback=lambda: self._extract(question, chunks),
         )
+        return self.validate_output(question, chunks, raw, requirements)
+
+    def validate_output(
+        self,
+        question: str,
+        chunks: list[RetrievedChunk],
+        raw: ReaderOutput,
+        requirements: list[str] | None = None,
+    ) -> tuple[list[Evidence], list[str], list[str]]:
+        units = source_units(chunks)
+        unit_lookup = {u["unit_id"]: u for u in units}
         selected = list(raw.evidence)
         supplemented = 0
         topic_terms = set(tokens(question)) - {
@@ -173,6 +192,9 @@ class ReaderAgent:
                     section=chunk.section,
                     start=chunk.start + span[0],
                     end=chunk.start + span[1],
+                    regions=intersect_regions(
+                        chunk.regions, chunk.start + span[0], chunk.start + span[1]
+                    ),
                 )
             )
         warnings = (

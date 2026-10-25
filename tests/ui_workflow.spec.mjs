@@ -128,11 +128,99 @@ try {
     ),
     false,
   );
+  // Replay the reported failure: rendering a notice is not an answered research question.
+  await page.evaluate(async () => {
+    const { renderEvents } = await import("/assets/report.js");
+    const events = [
+      { agent: "retrieval", status: "completed" },
+      { agent: "reader", status: "completed" },
+      { agent: "summarizer", status: "failed" },
+      {
+        agent: "orchestrator",
+        status: "completed",
+        details: { stop_reason: "budget_exhausted" },
+      },
+      {
+        agent: "writer",
+        status: "completed",
+        details: { written_claims: 0, stage: "report_rendering" },
+      },
+    ].map((event, i) => ({
+      sequence: i + 1,
+      round: 2,
+      created_at: "fixture-budget",
+      elapsed_ms: 0,
+      message: "Fixture",
+      details: {},
+      ...event,
+    }));
+    renderEvents(events, "completed");
+  });
+  assert.equal(
+    await page.locator("#pipeline-status").textContent(),
+    "ĐÃ DỪNG: HẾT NGÂN SÁCH",
+  );
+  assert.equal(
+    await page.locator("#pipeline-status").getAttribute("data-status"),
+    "partial",
+  );
+  assert.equal(
+    await page
+      .locator('.agent-node[data-agent="fact_checker"] .agent-status')
+      .textContent(),
+    "Chưa thực hiện",
+  );
+  assert.equal(
+    await page
+      .locator('.agent-node[data-agent="writer"] .agent-status')
+      .textContent(),
+    "Đã dựng thông báo",
+  );
+  assert.equal(
+    await page
+      .locator('.agent-node[data-agent="summarizer"] .agent-status')
+      .textContent(),
+    "Dừng do hết ngân sách",
+  );
+  assert.ok(
+    (await page.locator("#pipeline-live").textContent()).includes(
+      "Chưa có nhận định đã kiểm chứng",
+    ),
+  );
+  const labels = await page.evaluate(async () => {
+    const { recordStatusLabel } = await import("/assets/run_status.js");
+    return [
+      recordStatusLabel({
+        status: "completed",
+        stop_reason: "budget_exhausted",
+        reported_claim_count: 0,
+      }),
+      recordStatusLabel({
+        status: "completed",
+        result: {
+          coverage: [{ status: "unassessed" }],
+          reported_claim_ids: [],
+        },
+      }),
+      recordStatusLabel({
+        status: "completed",
+        result: {
+          coverage: [{ status: "covered" }],
+          reported_claim_ids: ["cl_test"],
+        },
+      }),
+    ];
+  });
+  assert.deepEqual(labels, [
+    "Đã dừng: hết ngân sách",
+    "Kết thúc: chưa đủ bằng chứng",
+    "Hoàn thành",
+  ]);
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
       status: "passed",
-      checks: 12,
+      checks: 19,
       heights,
       javascriptErrors: errors,
       liveRendering:

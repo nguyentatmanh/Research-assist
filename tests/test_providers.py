@@ -74,6 +74,10 @@ async def test_schema_repair_once(settings: Settings) -> None:
         with usage_scope() as usage:
             result = await generate(HTTPLanguageModel(settings, client))
     assert result.queries and usage.calls == 2
+    assert [e["status"] for e in usage.provider_events if e["kind"] == "http_attempt"] == [200, 200]
+    repair = next(e for e in usage.provider_events if e["kind"] == "schema_validation_failed")
+    assert "extra_forbidden" in repair["error_types"]
+    assert "unit-secret" not in json.dumps(usage.provider_events)
 
 
 @pytest.mark.parametrize(
@@ -133,6 +137,31 @@ async def test_retry_is_bounded_and_budgeted(
         with usage_scope() as usage, pytest.raises(ProviderError):
             await generate(HTTPLanguageModel(settings, client))
     assert usage.calls == 3
+
+
+async def test_configurable_retries_record_wait_and_remain_budgeted(settings, monkeypatch):
+    settings.llm_provider = "openai"
+    settings.llm_retry_attempts = 5
+    settings.llm_retry_initial_seconds = 5
+    waits = []
+
+    async def immediate(delay):
+        waits.append(delay)
+
+    monkeypatch.setattr("research_assist.infrastructure.llm.asyncio.sleep", immediate)
+    transport = httpx.MockTransport(lambda _: httpx.Response(503))
+    async with httpx.AsyncClient(transport=transport) as client:
+        with usage_scope() as usage, pytest.raises(ProviderError, match="HTTP 503"):
+            await generate(HTTPLanguageModel(settings, client))
+        assert usage.calls == 5 and len(waits) == 4
+        for index, delay in enumerate(waits):
+            assert 5 * 2**index <= delay <= min(60, 6.25 * 2**index)
+        retry_events = [e for e in usage.provider_events if e["kind"] == "retry_scheduled"]
+        assert len(retry_events) == 4
+        settings.llm_max_calls = 3
+        with usage_scope() as limited, pytest.raises(ProviderError, match="ngân sách số lần"):
+            await generate(HTTPLanguageModel(settings, client))
+        assert limited.calls == 3
 
 
 async def test_gemini_payload_thought_filter_and_usage(settings: Settings) -> None:

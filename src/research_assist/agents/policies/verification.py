@@ -3,6 +3,7 @@
 import re
 from collections import Counter
 
+from research_assist.agents.policies.dates import date_mentions, without_dates
 from research_assist.domain.models import Claim, ClaimCheck, Evidence
 
 _NUMBER = re.compile(r"(?<!\w)[+−-]?\d+(?:[.,]\d+)*(?:[eE][+-]?\d+)?(?:%|％)?")
@@ -37,6 +38,32 @@ def number_mentions(text: str) -> set[tuple[str, bool]]:
     }
 
 
+def numeric_guard_reason(claim: str, quotes: list[str]) -> str:
+    """Check explicit dates as whole values, then retain the literal numeric guards.
+
+    This never establishes semantic support or changes a model's rejection.
+    Normalized month numbers cannot be borrowed to support unrelated measurements.
+    """
+    dates = date_mentions(claim)
+    if any(d.value is None for d in dates):
+        return "Nhận định chứa ngày tháng không hợp lệ."
+    if dates:
+        source_dates = {
+            (d.value, d.negated)
+            for quote in quotes
+            for d in date_mentions(quote)
+            if d.value is not None
+        }
+        if not {(d.value, d.negated) for d in dates}.issubset(source_dates):
+            return "Ngày tháng hoặc dấu phủ định không khớp với các trích dẫn đã kiểm tra."
+    remaining = without_dates(claim, dates)
+    if not numbers(remaining).issubset(numbers(" ".join(quotes))):
+        return "Có con số không xuất hiện trong các trích dẫn đã kiểm tra."
+    if not number_mentions(remaining).issubset(set().union(*(number_mentions(q) for q in quotes))):
+        return "Con số có dấu phủ định khác với bằng chứng; cần kiểm chứng lại."
+    return ""
+
+
 def validate_checks(
     claims: list[Claim], evidence: list[Evidence], checks: list[ClaimCheck]
 ) -> list[ClaimCheck]:
@@ -59,12 +86,7 @@ def validate_checks(
             reason = "Kết quả kiểm tra không trỏ tới bằng chứng hợp lệ của nhận định."
         elif check.verdict == "supported":
             quoted = [lookup[key].quote for key in check.evidence_ids]
-            if not numbers(claim.text).issubset(numbers(" ".join(quoted))):
-                reason = "Có con số không xuất hiện trong các trích dẫn đã kiểm tra."
-            elif not number_mentions(claim.text).issubset(
-                set().union(*(number_mentions(q) for q in quoted))
-            ):
-                reason = "Con số có dấu phủ định khác với bằng chứng; cần kiểm chứng lại."
+            reason = numeric_guard_reason(claim.text, quoted)
         if reason or check is None:
             validated.append(
                 ClaimCheck(

@@ -122,7 +122,7 @@ async def test_five_agents_call_real_http_adapter_without_demo_fallback(
         await container.close()
 
 
-async def test_budget_failure_trace_preserves_consumed_tokens(settings):
+async def test_budget_stop_returns_partial_report_and_preserves_consumed_tokens(settings):
     settings.llm_provider = "openai"
     settings.openai_api_key = SecretStr("test-key")
     settings.llm_max_total_tokens = 1000
@@ -160,8 +160,12 @@ async def test_budget_failure_trace_preserves_consumed_tokens(settings):
         )
         await container.runs.tasks[record.id]
         finished = container.repository.run(record.id)
-        assert finished.status == "failed"
-        assert "1,000/1,000" in finished.error
+        assert finished.status == "completed"
+        assert finished.error is None
+        assert finished.result.stop_reason == "budget_exhausted"
+        assert not finished.result.reported_claim_ids
+        assert finished.result.gap_details[0].reason == "budget_exhausted"
+        assert any("1,000/1,000" in w for w in finished.result.warnings)
         failed = next(
             e for e in finished.events if e.agent == "summarizer" and e.status == "failed"
         )

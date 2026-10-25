@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from research_assist.domain.errors import NotFoundError
+from research_assist.domain.errors import DocumentError, NotFoundError
 from research_assist.domain.models import Document, IndexedChunk, RunRecord
 
 
@@ -173,8 +173,21 @@ class Repository:
                 [(c.model_dump_json(), c.id) for c in chunks],
             )
 
-    def replace_index(self, staged: list[tuple[Document, list[IndexedChunk]]]) -> None:
+    def replace_index(
+        self,
+        staged: list[tuple[Document, list[IndexedChunk]]],
+        *,
+        expected_revision: int | None = None,
+    ) -> None:
         with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            revision = db.execute(
+                "SELECT revision FROM retrieval_revision WHERE singleton=1"
+            ).fetchone()[0]
+            if expected_revision is not None and revision != expected_revision:
+                raise DocumentError(
+                    "Kho tài liệu đã thay đổi trong khi rebuild; chỉ mục mới chưa được áp dụng."
+                )
             for document, chunks in staged:
                 db.execute("DELETE FROM chunks WHERE document_id=?", (document.id,))
                 db.executemany(
@@ -242,6 +255,17 @@ class Repository:
                     "created_at": data["created_at"],
                     "question": data["request"]["question"],
                     "title": data["result"]["title"] if data.get("result") else None,
+                    "stop_reason": (data.get("result") or {}).get("stop_reason"),
+                    "coverage_complete": (
+                        bool((data.get("result") or {}).get("coverage"))
+                        and all(
+                            c.get("status") == "covered"
+                            for c in (data.get("result") or {}).get("coverage", [])
+                        )
+                    ),
+                    "reported_claim_count": len(
+                        (data.get("result") or {}).get("reported_claim_ids", [])
+                    ),
                 }
             )
         return history

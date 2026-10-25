@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,14 +20,31 @@ class DocumentService:
         self.maintenance = False
         self.sample_dir = Path(__file__).resolve().parents[1] / "sample_data"
 
-    async def ingest(self, data: bytes, filename: str) -> tuple[Document, bool]:
+    async def ingest(
+        self,
+        data: bytes,
+        filename: str,
+        on_progress: Callable[[str, dict[str, int]], None] | None = None,
+    ) -> tuple[Document, bool]:
         filename = safe_filename(filename)
+
+        def report(stage: str, **values: int) -> None:
+            if on_progress:
+                on_progress(stage, values)
+
+        report("waiting")
         async with self.lock:
             digest = hashlib.sha256(data).hexdigest()
             existing = self.repository.by_hash(digest)
             if existing:
                 return existing, True
+            report("extracting")
             sections = await asyncio.to_thread(extract, data, filename, self.settings)
+            report(
+                "chunking",
+                pages=len(sections) if Path(filename).suffix.lower() == ".pdf" else 0,
+                text_chars=sum(len(section.text) for section in sections),
+            )
             first_line = next((s.text.splitlines()[0] for s in sections if s.text), filename)
             title = (
                 first_line.lstrip("# ")[:180] if filename.endswith(".md") else Path(filename).stem
@@ -50,7 +68,20 @@ class DocumentService:
                 raise CapacityError(
                     "Kho tài liệu đã đạt giới hạn chunk; xóa tài liệu cũ trước khi tải thêm."
                 )
-            vectors = await self.embedder.embed([chunk.text for chunk in chunks])
+            report(
+                "embedding" if self.embedder.fingerprint else "saving",
+                chunks=len(chunks),
+                model_loading=int(getattr(self.embedder, "model_loaded", True) is False),
+            )
+            if on_progress and self.embedder.fingerprint:
+                vectors = []
+                for start in range(0, len(chunks), self.settings.embedding_batch_size):
+                    batch = chunks[start : start + self.settings.embedding_batch_size]
+                    vectors.extend(await self.embedder.embed([chunk.text for chunk in batch]))
+                    report("embedding", embedded=start + len(batch), model_loading=0)
+            else:
+                vectors = await self.embedder.embed([chunk.text for chunk in chunks])
+            report("saving", embedded=len(chunks) if vectors else 0)
             indexed = [
                 IndexedChunk(
                     **chunk.model_dump(),
@@ -102,6 +133,7 @@ class DocumentService:
         try:
             async with self.lock:
                 staged = []
+                revision = self.repository.corpus_revision()
                 count = 0
                 for document in self.repository.documents():
                     data = await asyncio.to_thread(self.repository.blob(document.id).read_bytes)
@@ -134,7 +166,7 @@ class DocumentService:
                     )
                     staged.append((document, indexed))
                 # No await: cancellation cannot split this commit. Old reports own source snapshots.
-                self.repository.replace_index(staged)
+                self.repository.replace_index(staged, expected_revision=revision)
                 return count
         finally:
             self.maintenance = False

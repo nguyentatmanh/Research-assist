@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from research_assist.api.app import create_app
 from research_assist.config import Settings
+from research_assist.domain.metadata import EVIDENCE_POLICY
 from research_assist.domain.models import Document, RunRecord
 from research_assist.experiments.system_benchmark import benchmark
 from research_assist.infrastructure.repository import Repository
@@ -59,7 +60,7 @@ def test_legacy_results_and_new_coverage_survive_restart(settings: Settings) -> 
         assert RunRecord.model_validate(finished).result.policy_version == "unclassified"
     with TestClient(create_app(settings)) as client:
         loaded = client.get(f"/api/runs/{run['id']}").json()
-        assert loaded["result"]["policy_version"] == "evidence-first"
+        assert loaded["result"]["policy_version"] == EVIDENCE_POLICY
 
 
 async def test_system_benchmark_is_isolated_and_does_not_claim_quality() -> None:
@@ -162,7 +163,9 @@ async def test_second_round_can_use_new_evidence_when_first_pool_is_full(evidenc
     )
     result = await pipeline.run(
         "run_fixture",
-        ResearchRequest(question="Explain the missing research evidence"),
+        ResearchRequest(
+            question="Explain the missing research evidence", orchestration_mode="fixed"
+        ),
         lambda event: None,
     )
     assert result.rounds == 2 and result.evidence[0].id == "ev_new"

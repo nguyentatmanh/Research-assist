@@ -297,9 +297,7 @@
                       id="requirements"
                       rows="3"
                       maxlength="6012"
-                      placeholder="Phương pháp truy xuất
-Cách kiểm tra bằng chứng
-Hạn chế được tác giả nêu"
+                      placeholder="Nhập các ý bạn muốn làm rõ (không bắt buộc)"
                     ></textarea>
                   </details>
                   <div class="scope-control">
@@ -1011,6 +1009,69 @@ RA_EMBEDDING_MODEL=intfloat/multilingual-e5-small</pre>
         </button>
       </form>
     </dialog>
+    <section
+      id="upload-status"
+      class="upload-status"
+      aria-labelledby="upload-title"
+      hidden
+    >
+      <div class="upload-status-heading">
+        <div>
+          <strong id="upload-title">Đang tải tài liệu</strong>
+          <span id="upload-count"></span>
+        </div>
+        <button
+          id="upload-close"
+          class="icon-button"
+          aria-label="Đóng tiến độ tải tài liệu"
+          hidden
+        >
+          <svg><use href="#i-close" /></svg>
+        </button>
+      </div>
+      <p id="upload-filename" class="upload-filename"></p>
+      <div class="upload-file-facts">
+        <span id="upload-size">0 B</span>
+        <span id="upload-input-details">Đang nhận tài liệu</span>
+      </div>
+      <div class="upload-progress-line">
+        <progress
+          id="upload-progress"
+          max="100"
+          value="0"
+          aria-label="Tiến độ truyền tài liệu"
+        ></progress>
+        <span id="upload-percent"></span>
+      </div>
+      <p
+        id="upload-message"
+        class="upload-message"
+        role="status"
+        aria-live="polite"
+      ></p>
+      <p id="upload-speed" class="upload-speed"></p>
+      <div class="upload-metrics">
+        <div>
+          <span>Đã truyền</span><strong id="upload-transferred">0 B</strong>
+        </div>
+        <div>
+          <span>Đã xử lý</span><strong id="upload-work">Chưa xác định</strong>
+        </div>
+        <div>
+          <span>Đã chạy</span><strong id="upload-elapsed">00:00</strong>
+        </div>
+        <div>
+          <span>Còn lại · ước tính</span
+          ><strong id="upload-remaining">Đang tính</strong>
+        </div>
+      </div>
+      <div class="upload-steps" aria-label="Các bước xử lý tài liệu">
+        <span id="upload-step-transfer">Truyền tệp</span>
+        <span id="upload-step-extract">Đọc tài liệu</span>
+        <span id="upload-step-chunk">Chia đoạn</span>
+        <span id="upload-step-index">Lập chỉ mục</span>
+      </div>
+    </section>
     <div
       id="toast-region"
       class="toast-region"

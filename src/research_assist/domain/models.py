@@ -1,6 +1,6 @@
 """The shared language between agents. Identifiers are assigned by the application."""
 
-from typing import Literal
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -24,6 +24,12 @@ class Document(Contract):
     index_version: str = "legacy"
 
 
+class SourceRegion(Contract):
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+    bbox: list[float] = Field(min_length=4, max_length=4)
+
+
 class SourceSection(Contract):
     text: str
     page: int | None = None
@@ -31,6 +37,7 @@ class SourceSection(Contract):
     offset: int = 0
     extraction: Literal["text", "ocr"] = "text"
     warnings: list[str] = Field(default_factory=list)
+    regions: list[SourceRegion] = Field(default_factory=list)
 
 
 class Chunk(Contract):
@@ -44,6 +51,7 @@ class Chunk(Contract):
     ordinal: int = Field(ge=0)
     start: int = Field(ge=0)
     end: int = Field(ge=0)
+    regions: list[SourceRegion] = Field(default_factory=list)
 
 
 class IndexedChunk(Chunk):
@@ -71,6 +79,7 @@ class ResearchRequest(Contract):
     max_rounds: int = Field(default=2, ge=1, le=2)
     profile: Literal["balanced", "academic"] | None = None
     use_cache: bool = True
+    orchestration_mode: Literal["fixed", "adaptive", "autonomous"] | None = None
     requirements: list[str] = Field(default_factory=list, max_length=12)
 
     @model_validator(mode="after")
@@ -150,6 +159,7 @@ class Evidence(RawEvidence):
     section: str
     start: int
     end: int
+    regions: list[SourceRegion] = Field(default_factory=list)
 
 
 class RawClaim(Contract):
@@ -190,10 +200,50 @@ class CoverageCheck(Contract):
     explanation: str = Field(min_length=1, max_length=700)
 
 
+FollowUpAction = Literal["retrieve", "read_context", "revise", "verify"]
+
+
+class FollowUpRequest(Contract):
+    action: FollowUpAction
+    requirement_ids: list[str] = Field(min_length=1, max_length=12)
+    claim_ids: list[str] = Field(default_factory=list, max_length=16)
+    chunk_ids: list[str] = Field(default_factory=list, max_length=4)
+    need: str = Field(min_length=8, max_length=700)
+
+
+class AgentTask(FollowUpRequest):
+    id: str
+    requested_by: Literal["fact_checker", "supervisor", "orchestrator"] = "fact_checker"
+    assigned_to: Literal["retrieval", "reader", "summarizer", "fact_checker"]
+    status: Literal["pending", "running", "resolved", "unresolved"] = "pending"
+    attempts: int = Field(default=0, ge=0)
+
+
+class CoordinationDecision(Contract):
+    action: Literal["retrieve", "read_context", "revise", "verify", "finish"]
+    task_ids: list[str] = Field(default_factory=list, max_length=4)
+    reason: str = Field(min_length=8, max_length=700)
+
+
+class RetrievalAction(Contract):
+    action: Literal["search", "finish"]
+    queries: list[str] = Field(default_factory=list, max_length=4)
+    mode: Literal["lexical", "hybrid"] = "hybrid"
+    reason: str = Field(min_length=8, max_length=500)
+
+    @field_validator("queries")
+    @classmethod
+    def bounded_queries(cls, values: list[str]) -> list[str]:
+        if any(not q.strip() or len(q) > 1000 for q in values):
+            raise ValueError("Each search query must contain 1-1000 characters")
+        return list(dict.fromkeys(q.strip() for q in values))
+
+
 class FactCheckOutput(Contract):
     checks: list[ClaimCheck] = Field(default_factory=list, max_length=16)
     coverage: list[CoverageCheck] = Field(default_factory=list, max_length=12)
     gap_checks: list[GapCheck] = Field(default_factory=list, max_length=16)
+    requests: list[FollowUpRequest] = Field(default_factory=list, max_length=8)
 
 
 class WrittenReport(Contract):
@@ -218,6 +268,74 @@ class WriterOutput(Contract):
     sections: list[ReportSection] = Field(default_factory=list, max_length=13)
 
 
+WorkerRole = Literal["retrieval", "reader", "summarizer", "fact_checker", "writer"]
+RuntimeRole = WorkerRole
+# Request provenance also records code scheduling and retired historical roles.
+TaskRequester = Literal[
+    "retrieval", "reader", "summarizer", "fact_checker", "writer", "orchestrator", "supervisor"
+]
+TaskStatus = Literal["pending", "running", "waiting", "completed", "blocked", "cancelled"]
+
+
+class TaskRequest(Contract):
+    role: WorkerRole
+    instruction: str = Field(min_length=8, max_length=1000)
+    requirement_ids: list[str] = Field(default_factory=list, max_length=12)
+    claim_ids: list[str] = Field(default_factory=list, max_length=16)
+    chunk_ids: list[str] = Field(default_factory=list, max_length=12)
+    depends_on: list[str] = Field(default_factory=list, max_length=16)
+
+
+class RuntimeTask(TaskRequest):
+    id: str
+    requested_by: TaskRequester = "orchestrator"
+    parent_id: str | None = None
+    status: TaskStatus = "pending"
+    message: str = ""
+
+
+class ToolArguments(Contract):
+    queries: list[str] = Field(default_factory=list, max_length=4)
+    search_mode: Literal["lexical", "hybrid"] | None = None
+    chunk_ids: list[str] = Field(default_factory=list, max_length=12)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=24)
+    claim_ids: list[str] = Field(default_factory=list, max_length=16)
+    task_id: str | None = None
+    task: TaskRequest | None = None
+
+    @field_validator("queries")
+    @classmethod
+    def query_limits(cls, queries: list[str]) -> list[str]:
+        if any(not q.strip() or len(q) > 1000 for q in queries):
+            raise ValueError("Queries must contain 1-1000 characters")
+        return list(dict.fromkeys(q.strip() for q in queries))
+
+
+OutputT = TypeVar("OutputT", bound=BaseModel)
+
+
+class AgentDecision(Contract, Generic[OutputT]):
+    action: Literal["use_tool", "request_task", "finish", "blocked"]
+    tool: str | None = Field(default=None, max_length=60)
+    arguments: ToolArguments | None = None
+    result: OutputT | None = None
+    reason: str = Field(min_length=8, max_length=500)
+
+
+class SearchCompletion(Contract):
+    chunk_ids: list[str] = Field(default_factory=list, max_length=12)
+
+
+class AgentSession(Contract):
+    task_id: str
+    # Accept old persisted sessions without making Supervisor an executable role.
+    role: RuntimeRole | Literal["supervisor"]
+    steps: int = Field(default=0, ge=0)
+    status: TaskStatus = "pending"
+    observations: list[dict[str, object]] = Field(default_factory=list)
+    message: str = ""
+
+
 class AgentEvent(Contract):
     sequence: int
     agent: str
@@ -233,6 +351,7 @@ class AgentUsage(Contract):
     agent: str
     provider: str
     model: str
+    models_used: list[str] = Field(default_factory=list)
     execution: Literal["local", "api", "demo"]
     calls: int = 0
     cache_hits: int = 0
@@ -274,6 +393,10 @@ class ResearchResult(Contract):
     cache_hits: int = 0
     agent_usage: list[AgentUsage] = Field(default_factory=list)
     estimated_cost_usd: float | None = None
+    orchestration_mode: Literal["fixed", "adaptive", "autonomous"] = "fixed"
+    agent_tasks: list[AgentTask] = Field(default_factory=list)
+    task_graph: list[RuntimeTask] = Field(default_factory=list)
+    agent_sessions: list[AgentSession] = Field(default_factory=list)
 
 
 class RunRecord(Contract):

@@ -1,5 +1,6 @@
 from research_assist.agents.policies.verification import numbers, validate_checks  # noqa: F401
 from research_assist.agents.prompts.fact_checker import INSTRUCTION
+from research_assist.domain.coordination import valid_requests
 from research_assist.domain.coverage import validate_coverage
 from research_assist.domain.models import (
     Claim,
@@ -40,12 +41,21 @@ class FactCheckerAgent:
                 "question": question,
                 "candidate_gaps": list(enumerate(gaps or [])),
                 "claims": [c.model_dump() for c in claims],
-                "evidence": [e.model_dump() for e in evidence],
+                "evidence": [e.model_dump(exclude={"regions"}) for e in evidence],
                 "requirements": [r.model_dump() for r in requirements],
             },
             schema=FactCheckOutput,
             fallback=lambda: self._extractive_checks(claims, evidence),
         )
+        return self.validate_output(output, claims, evidence, requirements)
+
+    def validate_output(
+        self,
+        output: FactCheckOutput,
+        claims: list[Claim],
+        evidence: list[Evidence],
+        requirements: list[Requirement],
+    ) -> FactCheckOutput:
         checks = validate_checks(claims, evidence, output.checks)
         coverage = validate_coverage(requirements, output.coverage, checks)
         if len(requirements) > 1:
@@ -60,6 +70,7 @@ class FactCheckerAgent:
             checks=checks,
             coverage=coverage,
             gap_checks=output.gap_checks,
+            requests=valid_requests(output.requests, requirements, claims, evidence),
         )
 
     def _extractive_checks(self, claims: list[Claim], evidence: list[Evidence]) -> FactCheckOutput:

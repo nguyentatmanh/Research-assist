@@ -11,6 +11,7 @@ from uuid import uuid4
 from research_assist.config import Settings
 from research_assist.domain.errors import DocumentError
 from research_assist.domain.models import Chunk, Document, SourceSection
+from research_assist.domain.provenance import intersect_regions
 
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".docx"}
 
@@ -50,7 +51,9 @@ def extract(data: bytes, filename: str, settings: Settings) -> list[SourceSectio
                 total = 0
                 ocr_pages = 0
                 for index, page in enumerate(pdf):
-                    text = normalize_text(page.get_text("text", sort=True))
+                    from research_assist.infrastructure.pdf_layout import page_layout
+
+                    text, regions = page_layout(page)
                     extraction: Literal["text", "ocr"] = "text"
                     warnings: list[str] = []
                     if len(text) < 40 and page.get_images():
@@ -75,9 +78,7 @@ def extract(data: bytes, filename: str, settings: Settings) -> list[SourceSectio
                                     dpi=settings.pdf_ocr_dpi,
                                     full=True,
                                 )
-                                text = normalize_text(
-                                    page.get_text("text", textpage=textpage, sort=True)
-                                )
+                                text, regions = page_layout(page, textpage=textpage)
                                 extraction = "ocr"
                                 warnings.append(
                                     f"Trang {index + 1}: văn bản OCR cần đối chiếu ảnh gốc, "
@@ -106,6 +107,7 @@ def extract(data: bytes, filename: str, settings: Settings) -> list[SourceSectio
                             label=f"Trang {index + 1}" + (" · OCR" if extraction == "ocr" else ""),
                             extraction=extraction,
                             warnings=warnings,
+                            regions=regions,
                         )
                     )
         elif suffix == ".docx":
@@ -184,6 +186,7 @@ def chunk_sections(
                         ordinal=len(chunks),
                         start=offset,
                         end=offset + len(text),
+                        regions=intersect_regions(section.regions, offset, offset + len(text)),
                     )
                 )
             if end >= len(section.text):

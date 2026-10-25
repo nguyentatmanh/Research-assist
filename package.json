@@ -8,7 +8,8 @@
     "format:web": "prettier --write src/research_assist/web/*.{html,css,js}",
     "test:ui:workflow": "node tests/ui_workflow.spec.mjs",
     "test:ui:design": "node tests/ui_design.spec.mjs",
-    "test:ui:fonts": "node tests/ui_fonts.spec.mjs"
+    "test:ui:fonts": "node tests/ui_fonts.spec.mjs",
+    "test:ui:upload": "node tests/ui_upload.spec.mjs"
   },
   "devDependencies": {
     "jsdom": "^26.1.0",

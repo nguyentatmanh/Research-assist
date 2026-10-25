@@ -1,12 +1,15 @@
+import asyncio
 import hmac
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
+from uuid import UUID
 
-from fastapi import FastAPI, File, Request, UploadFile
+from fastapi import FastAPI, File, Header, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,9 +18,16 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from research_assist import __version__
 from research_assist.agents.catalog import public_specs
+from research_assist.api.upload_progress import UploadProgress
 from research_assist.bootstrap import Container, build_container
 from research_assist.config import Settings
-from research_assist.domain.errors import CapacityError, DocumentError, NotFoundError, ResearchError
+from research_assist.domain.errors import (
+    CapacityError,
+    DocumentError,
+    NotFoundError,
+    ProviderError,
+    ResearchError,
+)
 from research_assist.domain.metadata import EVIDENCE_POLICY
 from research_assist.domain.models import ResearchRequest
 from research_assist.domain.ports import DiagnosticReranker
@@ -41,11 +51,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         container = build_container(settings)
         app.state.container = container
         try:
+            if settings.warmup_embedding:
+                try:
+                    await container.search.warmup()
+                except ProviderError:
+                    logging.getLogger(__name__).warning(
+                        "Embedding warmup unavailable; retry on demand"
+                    )
             yield
         finally:
             await container.close()
 
     app = FastAPI(title="Research Assist · Five-Agent RAG", version=__version__, lifespan=lifespan)
+    app.state.upload_progress = UploadProgress()
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
     def deps(request: Request) -> Container:
@@ -154,6 +172,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "max_rounds": 2,
             "auth_required": bool(settings.access_token.get_secret_value()),
             "workflow_profile": settings.workflow_profile,
+            "orchestration_mode": settings.orchestration_mode,
+            "coordinator_max_steps": settings.coordinator_max_steps,
+            "agent_max_steps": settings.agent_max_steps,
+            "autonomous_max_steps": settings.autonomous_max_steps,
+            "autonomous_max_tasks": settings.autonomous_max_tasks,
             "agent_routes": container.router.public_routes(),
             "cache_enabled": settings.cache_enabled,
             "llm_max_calls": settings.llm_max_calls,
@@ -166,7 +189,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "policy_version": EVIDENCE_POLICY,
             "agents": public_specs(),
-            "orchestrator": {"max_rounds": 2, "pattern": "bounded evidence feedback"},
+            "orchestrator": {
+                "max_rounds": 2,
+                "mode": settings.orchestration_mode,
+                "max_steps": settings.autonomous_max_steps
+                if settings.orchestration_mode == "autonomous"
+                else settings.coordinator_max_steps,
+                "agent_max_steps": settings.agent_max_steps,
+                "execution": "local",
+                "agent_count": 5,
+                "pattern": "five independent agent tool loops with code scheduling"
+                if settings.orchestration_mode == "autonomous"
+                else "code scheduling with typed evidence feedback",
+            },
         }
 
     @app.post("/api/cache/clear")
@@ -220,17 +255,53 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"documents": [d.model_dump() for d in deps(request).repository.documents()]}
 
     @app.post("/api/documents", status_code=201)
-    async def upload(request: Request, file: Annotated[UploadFile, File()]) -> dict[str, object]:
+    async def upload(
+        request: Request,
+        file: Annotated[UploadFile, File()],
+        upload_id: Annotated[str | None, Header(alias="X-Upload-ID")] = None,
+    ) -> dict[str, object]:
+        tracker: UploadProgress = request.app.state.upload_progress
+        registered = False
         try:
+            if upload_id:
+                try:
+                    upload_id = str(UUID(upload_id))
+                except ValueError:
+                    raise DocumentError("Mã tải tài liệu không hợp lệ.") from None
+                tracker.start(upload_id, file.size or 0)
+                registered = True
             data = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
             if len(data) > settings.max_upload_mb * 1024 * 1024:
                 raise DocumentError(f"Tệp vượt {settings.max_upload_mb} MB.")
             document, duplicate = await deps(request).documents.ingest(
-                data, file.filename or "file"
+                data,
+                file.filename or "file",
+                on_progress=(
+                    (lambda stage, values: tracker.update(upload_id, stage, values))
+                    if upload_id
+                    else None
+                ),
             )
+            if upload_id:
+                tracker.finish(upload_id)
             return {"document": document.model_dump(), "duplicate": duplicate}
+        except Exception as exc:
+            if registered and upload_id:
+                tracker.finish(
+                    upload_id,
+                    str(exc) if isinstance(exc, ResearchError) else "Không xử lý được tài liệu.",
+                )
+            raise
         finally:
             await file.close()
+
+    @app.get("/api/uploads/{upload_id}")
+    async def upload_status(upload_id: str, request: Request) -> dict[str, object]:
+        tracker: UploadProgress = request.app.state.upload_progress
+        status = tracker.get(upload_id)
+        if status is None:
+            raise NotFoundError("Không tìm thấy tiến độ tải tài liệu.")
+        return status
 
     @app.post("/api/documents/demo")
     async def seed(request: Request) -> dict[str, object]:
@@ -289,6 +360,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         await container.documents.delete(document_id)
         return Response(status_code=204)
+
+    @app.get("/api/documents/{document_id}/pages/{page_number}/region")
+    async def source_region(
+        document_id: str,
+        page_number: int,
+        clip: str,
+        request: Request,
+    ) -> Response:
+        repository = deps(request).repository
+        if repository.document(document_id).kind != "pdf":
+            raise DocumentError("Chỉ PDF có tọa độ vùng nguồn.")
+        from research_assist.infrastructure.source_preview import render_region
+
+        png = await asyncio.to_thread(
+            render_region, repository.blob(document_id), page_number, clip
+        )
+        return Response(png, media_type="image/png")
 
     @app.post("/api/runs", status_code=202)
     async def create_run(body: ResearchRequest, request: Request) -> dict[str, object]:

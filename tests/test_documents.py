@@ -151,3 +151,28 @@ async def test_capacity_guard_does_not_leave_partial_document(settings: Settings
         await service.ingest(b"Methods and retrieval evidence. " * 100, "large.txt")
     assert not service.repository.documents()
     assert not list(service.repository.blobs.iterdir())
+
+
+async def test_rebuild_rejects_concurrent_corpus_change_without_overwriting(settings):
+    repo = Repository(settings.data_dir)
+    service = DocumentService(repo, NoEmbeddings(), settings)
+    original, _ = await service.ingest(
+        b"Original RAG evidence remains unchanged during rebuild.", "old.txt"
+    )
+    before = [c.id for c in repo.chunks([original.id])]
+    other = DocumentService(Repository(settings.data_dir), NoEmbeddings(), settings)
+
+    class ConcurrentUpload:
+        fingerprint = None
+
+        async def embed(self, texts, *, query=False):
+            await other.ingest(
+                b"Concurrent new RAG evidence must not be lost during rebuild.", "new.txt"
+            )
+            return []
+
+    service.embedder = ConcurrentUpload()
+    with pytest.raises(DocumentError, match="đã thay đổi"):
+        await service.rebuild()
+    assert [c.id for c in repo.chunks([original.id])] == before
+    assert len(repo.documents()) == 2

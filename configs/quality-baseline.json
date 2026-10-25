@@ -1,0 +1,8 @@
+{
+  "reranker_provider": "none",
+  "rerank_candidates": 40,
+  "chunk_strategy": "tokens",
+  "chunk_tokens": 384,
+  "chunk_token_overlap": 48,
+  "llm_max_calls": 24
+}
