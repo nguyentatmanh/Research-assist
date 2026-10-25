@@ -35,7 +35,7 @@ class SummarizerAgent:
                 "question": question,
                 "language": language,
                 "requirements": [r.model_dump() for r in (requirements or [])],
-                "evidence": [e.model_dump() for e in evidence],
+                "evidence": [e.model_dump(exclude={"regions"}) for e in evidence],
                 "revision_requests": [r.model_dump() for r in (requests or [])],
             },
             schema=SynthesisOutput,

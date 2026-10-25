@@ -12,13 +12,25 @@ import httpx
 from pydantic import ValidationError
 
 from research_assist.config import AgentRole, AgentRoute, Settings
+from research_assist.domain.errors import ProviderUnavailable
 from research_assist.domain.metadata import EVIDENCE_POLICY
 from research_assist.domain.models import AgentUsage
 from research_assist.domain.ports import LanguageModel, T
-from research_assist.infrastructure.llm import DemoLanguageModel, HTTPLanguageModel, current_usage
+from research_assist.infrastructure.llm import (
+    DemoLanguageModel,
+    HTTPLanguageModel,
+    current_usage,
+    provider_event,
+)
 from research_assist.infrastructure.repository import Repository
 
 TASK_ROLES: dict[str, AgentRole] = {
+    "retrieval_step": "retrieval",
+    "reader_step": "reader",
+    "summarizer_step": "summarizer",
+    "fact_checker_step": "fact_checker",
+    "writer_step": "writer",
+    "retrieval_action": "retrieval",
     "question_plan": "retrieval",
     "retrieval_plan": "retrieval",
     "read_evidence": "reader",
@@ -57,6 +69,7 @@ class ModelRouter:
         self.name: str = settings.llm_provider
         self.model: str = settings.resolved_model
         self.models: dict[AgentRole, LanguageModel] = {}
+        self.fallback_models: dict[AgentRole, LanguageModel] = {}
         self.routes: dict[AgentRole, Settings] = {}
         gates: dict[str, RequestGate] = {}
         for role in dict.fromkeys(TASK_ROLES.values()):
@@ -70,6 +83,9 @@ class ModelRouter:
                 if route.llm_provider == "demo"
                 else HTTPLanguageModel(route, client, gate)
             )
+            if route.gemini_fallback_model:
+                secondary = route.model_copy(update={"llm_model": route.gemini_fallback_model})
+                self.fallback_models[role] = HTTPLanguageModel(secondary, client, gate)
         providers = {m.name for m in self.models.values()}
         self.name = next(iter(providers)) if len(providers) == 1 else "mixed"
         if len({m.model for m in self.models.values()}) > 1:
@@ -81,6 +97,7 @@ class ModelRouter:
                 "agent": role,
                 "provider": model.name,
                 "model": model.model,
+                "fallback_model": self.routes[role].gemini_fallback_model or None,
                 "execution": self.execution(role),
                 "planner_execution": ("demo" if model.name == "demo" else "api")
                 if role == "retrieval"
@@ -94,6 +111,15 @@ class ModelRouter:
     def execution(self, role: AgentRole) -> Literal["local", "api", "demo"]:
         usage = current_usage.get()
         profile = usage.profile if usage and usage.profile else self.settings.workflow_profile
+        orchestration = (
+            usage.orchestration_mode
+            if usage and usage.orchestration_mode
+            else self.settings.orchestration_mode
+        )
+        if orchestration == "autonomous":
+            return "demo" if self.models[role].name == "demo" else "api"
+        if role == "writer" and orchestration == "adaptive":
+            return "local"
         if profile == "balanced" and role in {"retrieval", "writer"}:
             return "local"
         return "demo" if self.models[role].name == "demo" else "api"
@@ -110,11 +136,13 @@ class ModelRouter:
         role = TASK_ROLES[task]
         model, route = self.models[role], self.routes[role]
         mode = self.execution(role)
-        if task == "question_plan":
+        if task in {"question_plan", "retrieval_action"} or task.endswith("_step"):
             mode = "demo" if model.name == "demo" else "api"
         usage = current_usage.get()
         before = (usage.calls, usage.input_tokens, usage.output_tokens) if usage else (0, 0, 0)
         begin, hit = time.perf_counter(), False
+        used_models = [model.model]
+        diagnostic_start = len(usage.provider_events) if usage else 0
         missing_before = usage.missing_usage if usage else 0
         try:
             if mode == "local":
@@ -134,6 +162,7 @@ class ModelRouter:
                         "task": task,
                         "provider": model.name,
                         "model": model.model,
+                        "fallback_model": route.gemini_fallback_model,
                         "endpoint": [
                             route.openai_base_url,
                             route.ollama_base_url,
@@ -144,6 +173,7 @@ class ModelRouter:
                         "schema": schema.model_json_schema(),
                         "output_tokens": route.llm_max_output_tokens,
                         "structured": route.structured_output,
+                        "wire_schema_policy": "gemini-compact-bounds-v1",
                         "thinking": [
                             route.gemini_thinking_level,
                             route.gemini_thinking_budget,
@@ -170,14 +200,49 @@ class ModelRouter:
                         return value
                     except ValidationError:
                         pass
-            value = await model.generate(
-                task=task,
-                instruction=instruction,
-                payload=payload,
-                schema=schema,
-                fallback=fallback,
+            secondary_model = self.fallback_models.get(role)
+            unavailable = (model.name, model.model)
+            skip_primary = bool(
+                secondary_model and usage and unavailable in usage.unavailable_models
             )
-            if cache_on:
+            primary_skipped = skip_primary
+            if not skip_primary:
+                try:
+                    value = await model.generate(
+                        task=task,
+                        instruction=instruction,
+                        payload=payload,
+                        schema=schema,
+                        fallback=fallback,
+                    )
+                except ProviderUnavailable:
+                    if usage:
+                        usage.unavailable_models.add(unavailable)
+                    if secondary_model is None:
+                        raise
+                    skip_primary = True
+            if skip_primary and secondary_model is not None:
+                provider_event(
+                    task,
+                    "model_fallback",
+                    provider=model.name,
+                    primary_model=model.model,
+                    fallback_model=secondary_model.model,
+                    primary_skipped=primary_skipped,
+                )
+                # State is per run; no shared mutation of the configured primary model.
+                if primary_skipped:
+                    used_models = []
+                used_models.append(secondary_model.model)
+                value = await secondary_model.generate(
+                    task=task,
+                    instruction=instruction,
+                    payload=payload,
+                    schema=schema,
+                    fallback=fallback,
+                )
+            # Do not label fallback content as a cached answer from the primary model.
+            if cache_on and not skip_primary:
                 await asyncio.to_thread(
                     self.repository.cache_put,
                     cache_key,
@@ -188,6 +253,15 @@ class ModelRouter:
             return value
         finally:
             if usage:
+                if mode == "api" and not hit:
+                    used_models = list(
+                        dict.fromkeys(
+                            str(event["model"])
+                            for event in usage.provider_events[diagnostic_start:]
+                            if event["kind"] in {"http_attempt", "network_error"}
+                            and "model" in event
+                        )
+                    )
                 entry = usage.agents.setdefault(
                     role,
                     AgentUsage(
@@ -206,6 +280,11 @@ class ModelRouter:
                 entry.input_tokens += inputs
                 entry.output_tokens += outputs
                 entry.cache_hits += int(hit)
+                for model_name in used_models:
+                    if model_name not in entry.models_used:
+                        entry.models_used.append(model_name)
+                if mode == "api" and entry.models_used:
+                    entry.model = " → ".join(entry.models_used)
                 entry.elapsed_ms += round((time.perf_counter() - begin) * 1000, 2)
                 prices = self.settings.agent_routes.get(role, AgentRoute())
                 if mode != "api" or (hit and entry.calls == 0):
@@ -214,6 +293,7 @@ class ModelRouter:
                     prices.input_usd_per_million is not None
                     and prices.output_usd_per_million is not None
                     and usage.missing_usage == missing_before
+                    and entry.models_used == [self.models[role].model]
                 ):
                     entry.estimated_cost_usd = (entry.estimated_cost_usd or 0.0) + (
                         inputs * prices.input_usd_per_million

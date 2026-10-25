@@ -41,7 +41,7 @@ class FactCheckerAgent:
                 "question": question,
                 "candidate_gaps": list(enumerate(gaps or [])),
                 "claims": [c.model_dump() for c in claims],
-                "evidence": [e.model_dump() for e in evidence],
+                "evidence": [e.model_dump(exclude={"regions"}) for e in evidence],
                 "requirements": [r.model_dump() for r in requirements],
             },
             schema=FactCheckOutput,

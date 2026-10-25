@@ -80,6 +80,9 @@ class RetrievalAgent:
         plan = RetrievalPlan(queries=queries, facets=[a.text for a in aspects])
         candidates: list[list[RetrievedChunk]] = []
         seen_chunk_ids = seen_chunk_ids or set()
+        prepare = getattr(self.search, "prepare_queries", None)
+        if prepare:
+            await prepare(queries, request.document_ids, mode_override or request.retrieval_mode)
         for query in queries:
             chunks, notes = await self.search.search(
                 [query],

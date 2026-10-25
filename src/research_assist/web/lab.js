@@ -103,7 +103,7 @@ export function renderUsage(result) {
     el(
       "p",
       "",
-      "Token do provider trả về; thời gian gồm xử lý ở từng bước. Đơn giá do người vận hành cấu hình.",
+      "Request gồm cả thử lại HTTP và sửa JSON; không phải số nhiệm vụ. Token do provider trả về; thời gian gồm xử lý ở từng bước. Đơn giá do người vận hành cấu hình.",
     ),
   );
 }

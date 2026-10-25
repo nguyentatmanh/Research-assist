@@ -7,6 +7,7 @@ from uuid import uuid4
 from research_assist.config import Settings
 from research_assist.domain.errors import DocumentError
 from research_assist.domain.models import Chunk, Document, SourceSection
+from research_assist.domain.provenance import intersect_regions
 
 
 @lru_cache(maxsize=4)
@@ -31,7 +32,10 @@ def token_chunks(
         stride = settings.chunk_tokens - settings.chunk_token_overlap
         for section in sections:
             offsets = tokenizer(
-                section.text, add_special_tokens=False, return_offsets_mapping=True
+                section.text,
+                add_special_tokens=False,
+                return_offsets_mapping=True,
+                verbose=False,
             )["offset_mapping"]
             for index in range(0, len(offsets), stride):
                 window = offsets[index : index + settings.chunk_tokens]
@@ -52,6 +56,11 @@ def token_chunks(
                             ordinal=len(chunks),
                             start=section.offset + start,
                             end=section.offset + start + len(text),
+                            regions=intersect_regions(
+                                section.regions,
+                                section.offset + start,
+                                section.offset + start + len(text),
+                            ),
                         )
                     )
                 if index + settings.chunk_tokens >= len(offsets):

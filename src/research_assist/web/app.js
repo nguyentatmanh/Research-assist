@@ -2,6 +2,7 @@ import { api, uploadDocument } from "./api.js";
 import { $, $$, el, icon, dateLabel, statuses, toast } from "./dom.js";
 import { renderEvents, renderResult, selectTab, copyReport } from "./report.js";
 import { renderBenchmark, renderRoutes } from "./lab.js";
+import { recordStatusLabel } from "./run_status.js";
 
 const state = {
   documents: [],
@@ -355,7 +356,7 @@ async function pollRun(runId) {
     }
     if (version !== state.pollVersion) return;
     activityRecord(record);
-    renderEvents(record.events, record.status);
+    renderEvents(record.events, record.status, record.result);
     if (["completed", "failed", "cancelled"].includes(record.status)) {
       setWorking(false);
       if (record.result) {
@@ -403,7 +404,7 @@ async function openRun(runId) {
   } else if (["queued", "running"].includes(record.status))
     await pollRun(runId);
   else {
-    renderEvents(record.events, record.status);
+    renderEvents(record.events, record.status, record.result);
     $("#results-section").hidden = true;
     $("#empty-state").hidden = false;
     toast(record.error || statuses[record.status], record.status === "failed");
@@ -861,7 +862,7 @@ async function showHistory() {
       item.append(
         icon("file"),
         content,
-        el("span", `history-state ${record.status}`, statuses[record.status]),
+        el("span", `history-state ${record.status}`, recordStatusLabel(record)),
       );
       item.addEventListener("click", () =>
         openRun(record.id).catch((error) => toast(error.message, true)),
@@ -1152,7 +1153,7 @@ function renderScopePicker() {
 }
 function activityRecord(record) {
   $("#activity-run").textContent =
-    `${record.request.question} · ${statuses[record.status]}`;
+    `${record.request.question} · ${recordStatusLabel(record)}`;
   $("#export-trace").hidden = false;
   $("#export-trace").href = `/api/runs/${record.id}/trace`;
   const documents = record.scope_documents || [];

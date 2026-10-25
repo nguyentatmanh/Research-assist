@@ -7,7 +7,14 @@ from uuid import uuid4
 from research_assist.application.pipeline import ResearchPipeline
 from research_assist.config import Settings
 from research_assist.domain.errors import CapacityError, NotFoundError, ResearchError
-from research_assist.domain.models import AgentEvent, ResearchRequest, RunRecord
+from research_assist.domain.models import (
+    AgentEvent,
+    AgentSession,
+    ResearchRequest,
+    ResearchResult,
+    RunRecord,
+    RuntimeTask,
+)
 from research_assist.infrastructure.repository import Repository, now
 
 logger = logging.getLogger(__name__)
@@ -59,6 +66,10 @@ class RunManager:
         return run
 
     async def _execute(self, run: RunRecord) -> None:
+        def checkpoint(result: ResearchResult) -> None:
+            run.result, run.updated_at = result, now()
+            self.repository.save_run(run)
+
         def emit(event: AgentEvent) -> None:
             run.events.append(event)
             run.updated_at = now()
@@ -69,17 +80,39 @@ class RunManager:
                 run.status, run.updated_at = "running", now()
                 self.repository.save_run(run)
                 async with asyncio.timeout(self.settings.run_timeout_seconds):
-                    run.result = await self.pipeline.run(run.id, run.request, emit)
+                    run.result = await self.pipeline.run(run.id, run.request, emit, checkpoint)
                 run.status = "completed"
         except asyncio.CancelledError:
             run.status = "cancelled"
             run.error = "Phiên nghiên cứu đã được dừng."
+            if run.result is not None:
+                run.result.stop_reason = "cancelled"
+                run.result.warnings.append(run.error)
             # Cancellation is persisted, including for queued tasks.
         except TimeoutError:
             run.status, run.error = (
                 "failed",
                 "Phiên nghiên cứu vượt thời gian tối đa. Thử giảm top_k hoặc đổi model.",
             )
+            if run.result is not None and run.result.reported_claim_ids:
+                run.status = "completed"
+                run.result = run.result.model_copy(
+                    update={
+                        "stop_reason": "timeout",
+                        "warnings": [*run.result.warnings, run.error],
+                    }
+                )
+                emit(
+                    AgentEvent(
+                        sequence=len(run.events) + 1,
+                        agent="orchestrator",
+                        status="completed",
+                        round=run.events[-1].round if run.events else 1,
+                        message="Hết thời gian; đã giữ báo cáo được kiểm chứng gần nhất.",
+                        details={"stop_reason": "timeout"},
+                        created_at=now(),
+                    )
+                )
         except ResearchError as exc:
             run.status, run.error = "failed", str(exc)
         except Exception as exc:
@@ -99,6 +132,16 @@ class RunManager:
                         created_at=now(),
                     )
                 )
+            if run.result is not None:
+                if run.status in {"failed", "cancelled"} or run.result.stop_reason == "timeout":
+                    interrupted: list[RuntimeTask | AgentSession] = [
+                        *run.result.task_graph,
+                        *run.result.agent_sessions,
+                    ]
+                    for item in interrupted:
+                        if item.status in {"pending", "running", "waiting"}:
+                            item.status = "blocked"
+                run.result.events = list(run.events)
             self.repository.save_run(run)
             self.tasks.pop(run.id, None)
 

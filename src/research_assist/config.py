@@ -2,10 +2,18 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-AgentRole = Literal["retrieval", "reader", "summarizer", "fact_checker", "writer", "supervisor"]
+AgentRole = Literal["retrieval", "reader", "summarizer", "fact_checker", "writer"]
 Provider = Literal["demo", "gemini", "openai", "ollama", "deepseek"]
 
 
@@ -13,6 +21,7 @@ class AgentRoute(BaseModel):
     model_config = ConfigDict(extra="forbid")
     provider: Provider | None = None
     model: str = ""
+    fallback_model: str = ""
     max_output_tokens: int | None = Field(default=None, ge=512, le=12000)
     thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
     input_usd_per_million: float | None = Field(default=None, ge=0)
@@ -33,12 +42,20 @@ class Settings(BaseSettings):
     llm_model: str = ""  # Provider-specific defaults; override to use a tuned model.
     workflow_profile: Literal["balanced", "academic"] = "balanced"
     orchestration_mode: Literal["fixed", "adaptive", "autonomous"] = "autonomous"
-    supervisor_max_steps: int = Field(default=4, ge=1, le=8)
+    coordinator_max_steps: int = Field(
+        default=4,
+        ge=1,
+        le=8,
+        validation_alias=AliasChoices(
+            "RA_COORDINATOR_MAX_STEPS", "RA_SUPERVISOR_MAX_STEPS", "coordinator_max_steps"
+        ),
+    )
     agent_max_steps: int = Field(default=6, ge=1, le=16)
     autonomous_max_steps: int = Field(default=16, ge=1, le=32)
     autonomous_max_tasks: int = Field(default=16, ge=1, le=32)
     agent_routes: dict[AgentRole, AgentRoute] = Field(default_factory=dict)
     gemini_api_key: SecretStr = SecretStr("")
+    gemini_fallback_model: str = ""
     openai_api_key: SecretStr = SecretStr("")
     openai_base_url: str = "https://api.openai.com/v1"
     ollama_base_url: str = "http://localhost:11434/v1"
@@ -68,6 +85,8 @@ class Settings(BaseSettings):
     reranker_max_length: int = Field(default=512, ge=64, le=2048)
     reranker_failure_policy: Literal["fallback", "error"] = "fallback"
     search_cache_scopes: int = Field(default=2, ge=0, le=16)
+    query_cache_entries: int = Field(default=256, ge=0, le=4096)
+    warmup_embedding: bool = False
     search_cache_mb: int = Field(default=128, ge=8, le=2048)
     pdf_ocr_enabled: bool = False
     pdf_ocr_language: str = "eng"
@@ -84,6 +103,8 @@ class Settings(BaseSettings):
     llm_max_calls: int = Field(default=12, ge=3, le=30)
     llm_max_total_tokens: int = Field(default=60000, ge=1000, le=500000)
     llm_requests_per_minute: int = Field(default=20, ge=1, le=1000)
+    llm_retry_attempts: int = Field(default=3, ge=1, le=5)
+    llm_retry_initial_seconds: float = Field(default=2, ge=0.1, le=30)
     cache_enabled: bool = True
     cache_ttl_seconds: int = Field(default=86400, ge=0, le=604800)
     cache_max_entries: int = Field(default=1000, ge=10, le=10000)
@@ -102,6 +123,14 @@ class Settings(BaseSettings):
     # Optional password for shared lab deployments; no password needed on localhost.
     access_token: SecretStr = SecretStr("")
     allowed_hosts: list[str] = ["localhost", "127.0.0.1", "testserver"]
+
+    @field_validator("agent_routes", mode="before")
+    @classmethod
+    def retire_supervisor_route(cls, value: object) -> object:
+        """Old deployments may still configure a retired sixth model route."""
+        if isinstance(value, dict):
+            return {key: route for key, route in value.items() if key != "supervisor"}
+        return value
 
     @field_validator(
         "openai_base_url",
@@ -188,7 +217,20 @@ class Settings(BaseSettings):
             values["llm_max_output_tokens"] = route.max_output_tokens
         if route.thinking_level:
             values["gemini_thinking_level"] = route.thinking_level
+        if route.fallback_model:
+            values["gemini_fallback_model"] = route.fallback_model
         resolved = self.model_copy(update=values)
+        if resolved.gemini_fallback_model:
+            primary = resolved.resolved_model.removeprefix("models/")
+            secondary = resolved.gemini_fallback_model.removeprefix("models/")
+            if resolved.llm_provider != "gemini" or not secondary.startswith("gemini-"):
+                raise ValueError("fallback_model is only supported for Gemini model routes")
+            if primary == secondary:
+                raise ValueError("fallback_model must differ from the primary model")
+            if secondary.startswith(("gemini-3.8", "gemini-3.7")) and (
+                resolved.gemini_thinking_level == "minimal"
+            ):
+                raise ValueError("Fallback Gemini 3.7/3.8 requires low thinking or higher")
         if (
             resolved.llm_provider == "gemini"
             and resolved.resolved_model.startswith(("gemini-3.8", "gemini-3.7"))

@@ -91,6 +91,11 @@ def build_container(
         WriterAgent(llm),
         embedder.fingerprint,
         settings.workflow_profile,
+        settings.orchestration_mode,
+        settings.coordinator_max_steps,
+        settings.agent_max_steps,
+        settings.autonomous_max_steps,
+        settings.autonomous_max_tasks,
     )
     return Container(
         settings,

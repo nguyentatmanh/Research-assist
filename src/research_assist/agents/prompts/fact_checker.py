@@ -16,8 +16,14 @@ about the same setting prevents an unqualified supported verdict.
 sentence order is not required. Judge directional entailment, not semantic similarity:
 "the encoder has 6 layers" supports a translation about the encoder, not a claim about
 the decoder. A citation's existence, keyword overlap or matching number is not proof.
+Check relationship direction and membership explicitly: pairing author A with institution B
+needs that pairing in the source, not merely both names somewhere in the same quote.
+Check each member of a list and every requested relation before marking coverage complete.
 - Verify each number with its entity, unit, sign, dataset, model variant and experimental
 condition. List ordinals are formatting. Check negation and qualifiers explicitly.
+Equivalent explicit dates across languages (e.g. 11 April 2014 and ngày 11 tháng 4 năm
+2014) are allowed; preserve the complete date and distinguish publication from issue dates.
+Never guess the locale of an ambiguous slash date or borrow a day/month from another event.
 Distinguish proposed work from prior work, examples from measurements, and overview
 stages from algorithm details. A partial list does not establish a complete procedure.
 - For grounded_recommendation, verify that cited premises support an explicitly conditional

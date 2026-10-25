@@ -1,5 +1,6 @@
 """Per-run working state. Only complete verification passes advance the report snapshot."""
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from research_assist.domain.models import (
@@ -35,3 +36,8 @@ class ResearchState:
     task_graph: dict[str, RuntimeTask] = field(default_factory=dict)
     sessions: dict[str, AgentSession] = field(default_factory=dict)
     report_layout: WriterOutput | None = None
+    checkpoint: Callable[[], Awaitable[None]] | None = None
+
+    async def save_checkpoint(self) -> None:
+        if self.checkpoint is not None:
+            await self.checkpoint()

@@ -133,6 +133,7 @@ class DocumentService:
         try:
             async with self.lock:
                 staged = []
+                revision = self.repository.corpus_revision()
                 count = 0
                 for document in self.repository.documents():
                     data = await asyncio.to_thread(self.repository.blob(document.id).read_bytes)
@@ -165,7 +166,7 @@ class DocumentService:
                     )
                     staged.append((document, indexed))
                 # No await: cancellation cannot split this commit. Old reports own source snapshots.
-                self.repository.replace_index(staged)
+                self.repository.replace_index(staged, expected_revision=revision)
                 return count
         finally:
             self.maintenance = False

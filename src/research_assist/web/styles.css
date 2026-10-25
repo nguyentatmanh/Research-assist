@@ -13,6 +13,10 @@
   --sidebar: 252px;
   color-scheme: light;
 }
+#pipeline-status[data-status="partial"] {
+  color: #87520b;
+  background: #fff4db;
+}
 * {
   box-sizing: border-box;
 }
@@ -3512,5 +3516,20 @@ a {
   }
 }
 .result-layout {
+  align-items: start;
+}
+.source-page-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 620px;
+  object-fit: contain;
+  margin: 16px auto;
+  background: white;
+  border: 1px solid var(--border, #ddd);
+}
+.source-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 12px;
   align-items: start;
 }

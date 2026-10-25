@@ -14,6 +14,31 @@ from research_assist.infrastructure.search import HybridSearch
 from tests.test_retrieval import TinyEmbedder
 
 
+async def test_query_prefetch_batches_unique_vectors_and_respects_model_identity(settings):
+    class CountingEmbedder(TinyEmbedder):
+        def __init__(self):
+            self.queries = []
+
+        async def embed(self, texts, *, query=False):
+            if query:
+                self.queries.append(list(texts))
+            return await super().embed(texts, query=query)
+
+    repo, embedder = Repository(settings.data_dir), CountingEmbedder()
+    doc, _ = await DocumentService(repo, embedder, settings).ingest(
+        b"Distant galaxies contain billions of stars and planetary systems.", "science.txt"
+    )
+    search = HybridSearch(repo, embedder, settings)
+    await search.prepare_queries(["astronomy", "stars", "astronomy"], [doc.id], "hybrid")
+    for query in ("astronomy", "stars"):
+        assert (await search.search([query], [doc.id], 4, "hybrid"))[0]
+    assert embedder.queries == [["astronomy", "stars"]]
+    embedder.fingerprint = "test:new-space"
+    await search._query_vectors(["astronomy"])
+    assert len(embedder.queries) == 2
+    assert search.diagnostics()["query_cache_entries"] == 3
+
+
 async def test_snapshot_reused_then_invalidated_for_other_repository_writes(
     settings: Settings,
 ) -> None:

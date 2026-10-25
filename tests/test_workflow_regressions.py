@@ -12,6 +12,7 @@ from research_assist.agents.writer import WriterAgent
 from research_assist.api.app import create_app
 from research_assist.bootstrap import build_container
 from research_assist.domain.coverage import reconcile_gaps, requirements_for
+from research_assist.domain.metadata import SECTION_INDEX
 from research_assist.domain.models import (
     Claim,
     ClaimCheck,
@@ -374,7 +375,7 @@ async def test_rebuild_uses_new_windows_and_rolls_back_on_failure(settings):
         rebuilt = container.repository.chunks([doc.id])
         assert len(rebuilt) > len(before)
         assert set(c.id for c in rebuilt).isdisjoint(c.id for c in before)
-        assert container.repository.document(doc.id).index_version == "section-windows"
+        assert container.repository.document(doc.id).index_version == SECTION_INDEX
 
         class BrokenEmbedder:
             fingerprint = "broken"

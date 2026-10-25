@@ -24,6 +24,12 @@ class Document(Contract):
     index_version: str = "legacy"
 
 
+class SourceRegion(Contract):
+    start: int = Field(ge=0)
+    end: int = Field(ge=0)
+    bbox: list[float] = Field(min_length=4, max_length=4)
+
+
 class SourceSection(Contract):
     text: str
     page: int | None = None
@@ -31,6 +37,7 @@ class SourceSection(Contract):
     offset: int = 0
     extraction: Literal["text", "ocr"] = "text"
     warnings: list[str] = Field(default_factory=list)
+    regions: list[SourceRegion] = Field(default_factory=list)
 
 
 class Chunk(Contract):
@@ -44,6 +51,7 @@ class Chunk(Contract):
     ordinal: int = Field(ge=0)
     start: int = Field(ge=0)
     end: int = Field(ge=0)
+    regions: list[SourceRegion] = Field(default_factory=list)
 
 
 class IndexedChunk(Chunk):
@@ -151,6 +159,7 @@ class Evidence(RawEvidence):
     section: str
     start: int
     end: int
+    regions: list[SourceRegion] = Field(default_factory=list)
 
 
 class RawClaim(Contract):

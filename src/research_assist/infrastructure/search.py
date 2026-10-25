@@ -2,6 +2,7 @@
 
 import asyncio
 import math
+import time
 from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -73,6 +74,10 @@ class HybridSearch:
         self._cache: OrderedDict[tuple[tuple[str, ...], str | None], SearchSnapshot] = OrderedDict()
         self._lock = asyncio.Lock()
         self._hits = self._builds = 0
+        self._queries: OrderedDict[tuple[str | None, str], list[float]] = OrderedDict()
+        self._query_lock = asyncio.Lock()
+        self._query_hits = self._query_misses = 0
+        self._embedding_ms = self._ranking_ms = 0
 
     def diagnostics(self) -> dict[str, int]:
         return {
@@ -80,7 +85,46 @@ class HybridSearch:
             "builds": self._builds,
             "scopes": len(self._cache),
             "estimated_bytes": sum(s.estimated_bytes for s in self._cache.values()),
+            "query_cache_hits": self._query_hits,
+            "query_cache_misses": self._query_misses,
+            "query_cache_entries": len(self._queries),
+            "embedding_ms": self._embedding_ms,
+            "ranking_ms": self._ranking_ms,
         }
+
+    async def _query_vectors(self, queries: list[str]) -> list[list[float]]:
+        async with self._query_lock:
+            keys = [(self.embedder.fingerprint, query) for query in queries]
+            missing = list(dict.fromkeys(k for k in keys if k not in self._queries))
+            self._query_hits += len(keys) - len(missing)
+            begin = time.perf_counter()
+            fresh = (
+                validate_vectors(
+                    await self.embedder.embed([k[1] for k in missing], query=True), len(missing)
+                )
+                if missing
+                else []
+            )
+            self._embedding_ms += round((time.perf_counter() - begin) * 1000)
+            self._query_misses += len(missing)
+            lookup = dict(zip(missing, fresh, strict=True))
+            result = [lookup[k] if k in lookup else self._queries[k] for k in keys]
+            for key, vector in zip(keys, result, strict=True):
+                self._queries[key] = vector
+                self._queries.move_to_end(key)
+            while len(self._queries) > self.settings.query_cache_entries:
+                self._queries.popitem(last=False)
+            return result
+
+    async def prepare_queries(self, queries: list[str], scope: list[str], mode: str) -> None:
+        if mode == "hybrid" and self.embedder.fingerprint:
+            snapshot = await self._snapshot(scope, True)
+            if snapshot.dense_chunks and self.settings.query_cache_entries >= len(set(queries)):
+                await self._query_vectors(queries)
+
+    async def warmup(self) -> None:
+        if self.embedder.fingerprint:
+            await self._query_vectors(["research document retrieval"])
 
     def _build(self, scope: list[str], fingerprint: str | None) -> SearchSnapshot:
         revision, chunks = self.repository.retrieval_snapshot(scope)
@@ -162,16 +206,15 @@ class HybridSearch:
                 "Một số tài liệu chưa có embedding đúng model. "
                 "Reindex để tìm kiếm ngữ nghĩa đầy đủ."
             )
-        vectors = (
-            await self.embedder.embed(queries, query=True)
-            if use_dense and snapshot.dense_chunks
-            else []
-        )
+        vectors = await self._query_vectors(queries) if use_dense and snapshot.dense_chunks else []
         if vectors:
             vectors = validate_vectors(vectors, len(queries))
         elif use_dense and snapshot.dense_chunks:
             raise ProviderError("Embedding không trả về vector cho truy vấn.")
-        return await asyncio.to_thread(self._rank, queries, snapshot, vectors, top_k, warnings)
+        begin = time.perf_counter()
+        result = await asyncio.to_thread(self._rank, queries, snapshot, vectors, top_k, warnings)
+        self._ranking_ms += round((time.perf_counter() - begin) * 1000)
+        return result
 
     async def expand_context(
         self, selected: list[RetrievedChunk], document_ids: list[str]
@@ -188,6 +231,7 @@ class HybridSearch:
         expanded = []
         for chunk in selected:
             start, end, text = chunk.start, chunk.end, chunk.text
+            regions = list(chunk.regions)
             neighbors = sorted(
                 by_page[(chunk.document_id, chunk.page)],
                 key=lambda c: abs(c.ordinal - chunk.ordinal),
@@ -211,8 +255,18 @@ class HybridSearch:
                 if neighbor.end > end:
                     text += neighbor.text[end - neighbor.start :]
                     end = neighbor.end
+                regions.extend(r for r in neighbor.regions if r not in regions)
                 break
-            expanded.append(chunk.model_copy(update={"text": text, "start": start, "end": end}))
+            expanded.append(
+                chunk.model_copy(
+                    update={
+                        "text": text,
+                        "start": start,
+                        "end": end,
+                        "regions": regions,
+                    }
+                )
+            )
         return expanded
 
     async def read_section(

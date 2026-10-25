@@ -1,5 +1,7 @@
+import asyncio
 import hmac
 import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,7 +21,13 @@ from research_assist.agents.catalog import public_specs
 from research_assist.api.upload_progress import UploadProgress
 from research_assist.bootstrap import Container, build_container
 from research_assist.config import Settings
-from research_assist.domain.errors import CapacityError, DocumentError, NotFoundError, ResearchError
+from research_assist.domain.errors import (
+    CapacityError,
+    DocumentError,
+    NotFoundError,
+    ProviderError,
+    ResearchError,
+)
 from research_assist.domain.metadata import EVIDENCE_POLICY
 from research_assist.domain.models import ResearchRequest
 from research_assist.domain.ports import DiagnosticReranker
@@ -43,6 +51,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         container = build_container(settings)
         app.state.container = container
         try:
+            if settings.warmup_embedding:
+                try:
+                    await container.search.warmup()
+                except ProviderError:
+                    logging.getLogger(__name__).warning(
+                        "Embedding warmup unavailable; retry on demand"
+                    )
             yield
         finally:
             await container.close()
@@ -158,7 +173,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "auth_required": bool(settings.access_token.get_secret_value()),
             "workflow_profile": settings.workflow_profile,
             "orchestration_mode": settings.orchestration_mode,
-            "supervisor_max_steps": settings.supervisor_max_steps,
+            "coordinator_max_steps": settings.coordinator_max_steps,
             "agent_max_steps": settings.agent_max_steps,
             "autonomous_max_steps": settings.autonomous_max_steps,
             "autonomous_max_tasks": settings.autonomous_max_tasks,
@@ -179,11 +194,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "mode": settings.orchestration_mode,
                 "max_steps": settings.autonomous_max_steps
                 if settings.orchestration_mode == "autonomous"
-                else settings.supervisor_max_steps,
+                else settings.coordinator_max_steps,
                 "agent_max_steps": settings.agent_max_steps,
-                "pattern": "independent agent tool loops with task dependencies"
+                "execution": "local",
+                "agent_count": 5,
+                "pattern": "five independent agent tool loops with code scheduling"
                 if settings.orchestration_mode == "autonomous"
-                else "supervisor dispatch with typed evidence feedback",
+                else "code scheduling with typed evidence feedback",
             },
         }
 
@@ -343,6 +360,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         await container.documents.delete(document_id)
         return Response(status_code=204)
+
+    @app.get("/api/documents/{document_id}/pages/{page_number}/region")
+    async def source_region(
+        document_id: str,
+        page_number: int,
+        clip: str,
+        request: Request,
+    ) -> Response:
+        repository = deps(request).repository
+        if repository.document(document_id).kind != "pdf":
+            raise DocumentError("Chỉ PDF có tọa độ vùng nguồn.")
+        from research_assist.infrastructure.source_preview import render_region
+
+        png = await asyncio.to_thread(
+            render_region, repository.blob(document_id), page_number, clip
+        )
+        return Response(png, media_type="image/png")
 
     @app.post("/api/runs", status_code=202)
     async def create_run(body: ResearchRequest, request: Request) -> dict[str, object]:

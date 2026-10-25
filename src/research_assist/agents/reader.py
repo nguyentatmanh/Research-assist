@@ -10,6 +10,7 @@ from research_assist.domain.models import (
     RetrievedChunk,
 )
 from research_assist.domain.ports import LanguageModel
+from research_assist.domain.provenance import intersect_regions
 from research_assist.domain.source_units import source_units
 from research_assist.domain.text import fold, tokens
 
@@ -191,6 +192,9 @@ class ReaderAgent:
                     section=chunk.section,
                     start=chunk.start + span[0],
                     end=chunk.start + span[1],
+                    regions=intersect_regions(
+                        chunk.regions, chunk.start + span[0], chunk.start + span[1]
+                    ),
                 )
             )
         warnings = (

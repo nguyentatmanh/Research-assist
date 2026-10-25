@@ -1,7 +1,9 @@
 import { $, $$, el, icon, locator, statuses, toast } from "./dom.js";
 import { renderUsage } from "./lab.js";
+import { runPresentation } from "./run_status.js";
 
 const agentLabels = {
+  supervisor: "Supervisor (phiên cũ)",
   retrieval: "Retrieval",
   reader: "Reader",
   summarizer: "Summarizer",
@@ -134,7 +136,9 @@ export function selectTab(name) {
   });
 }
 
-export function renderEvents(events, status) {
+export function renderEvents(events, status, result = null) {
+  const outcome = runPresentation(status, events, result);
+  const terminal = ["completed", "failed", "cancelled"].includes(status);
   const emptyState = $("#activity-empty");
   if (emptyState) emptyState.hidden = events.length > 0;
   const eventCount = $("#trace-count");
@@ -148,7 +152,21 @@ export function renderEvents(events, status) {
     node.classList.remove("running", "completed", "failed");
     const state = event?.status;
     if (state && state !== "cancelled") node.classList.add(state);
-    $(".agent-status", node).textContent = state ? statuses[state] : "Đang chờ";
+    const label = $(".agent-status", node);
+    label.textContent = state
+      ? statuses[state]
+      : terminal
+        ? "Chưa thực hiện"
+        : "Đang chờ";
+    if (state === "failed" && outcome.stopReason === "budget_exhausted")
+      label.textContent = "Dừng do hết ngân sách";
+    if (
+      node.dataset.agent === "writer" &&
+      state === "completed" &&
+      outcome.partial
+    )
+      label.textContent =
+        outcome.findings > 0 ? "Đã dựng báo cáo một phần" : "Đã dựng thông báo";
     if (["failed", "cancelled"].includes(status) && state === "running") {
       node.classList.remove("running");
       node.classList.add("failed");
@@ -156,10 +174,8 @@ export function renderEvents(events, status) {
     }
   });
   const statusLabel = $("#pipeline-status");
-  statusLabel.textContent = status
-    ? statuses[status].toUpperCase()
-    : "SẴN SÀNG";
-  statusLabel.dataset.status = status || "ready";
+  statusLabel.textContent = outcome.label.toUpperCase();
+  statusLabel.dataset.status = outcome.partial ? "partial" : status || "ready";
   statusLabel.classList.toggle(
     "running",
     status === "running" || status === "queued",
@@ -168,7 +184,9 @@ export function renderEvents(events, status) {
   live.hidden = events.length === 0;
   if (events.length) {
     const last = events.at(-1);
-    live.textContent = `Vòng ${last.round} · ${agentLabels[last.agent] || last.agent} · ${last.message}`;
+    live.textContent = outcome.partial
+      ? `${outcome.label} · ${outcome.findings > 0 ? "Giữ kết quả đã kiểm chứng" : "Chưa có nhận định đã kiểm chứng để trả lời"}`
+      : `Vòng ${last.round} · ${agentLabels[last.agent] || last.agent} · ${last.message}`;
   }
   const trace = $("#trace-content");
   const key = events[0]?.created_at || "empty";
@@ -271,7 +289,7 @@ export function renderResult(result) {
   renderChecks(result);
   renderCoverage(result);
   renderEvidence(result.evidence);
-  renderEvents(result.events, "completed");
+  renderEvents(result.events, "completed", result);
   selectTab("report");
   window.dispatchEvent(new Event("research-result-rendered"));
 }
@@ -389,7 +407,23 @@ export function showEvidence(evidence) {
   link.rel = "noopener";
   link.append(icon("external"));
   actions.append(link);
-  root.append(actions, el("h3", "", "Ngữ cảnh đoạn truy xuất"));
+  root.append(actions);
+  if (evidence.page && evidence.regions?.length) {
+    const previews = el("div", "source-previews");
+    const boxes = new Map(
+      evidence.regions.map((r) => [r.bbox.join(","), r.bbox]),
+    );
+    for (const clip of boxes.values()) {
+      const preview = el("img", "source-page-preview");
+      preview.alt = `Vùng bằng chứng trên trang ${evidence.page} của ${evidence.filename}`;
+      preview.loading = "lazy";
+      preview.src = `/api/documents/${encodeURIComponent(evidence.document_id)}/pages/${evidence.page}/region?clip=${encodeURIComponent(clip.join(","))}`;
+      preview.addEventListener("error", () => preview.remove());
+      previews.append(preview);
+    }
+    root.append(el("h3", "", "Vùng nguồn trên tài liệu gốc"), previews);
+  }
+  root.append(el("h3", "", "Ngữ cảnh đoạn truy xuất"));
   const chunk = currentResult.retrieved.find(
     (item) => item.id === evidence.chunk_id,
   );

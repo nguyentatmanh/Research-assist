@@ -33,6 +33,8 @@ class Case(Contract):
     answerable: bool | None = None
     label_source: Literal["synthetic", "human", "unreviewed"] = "unreviewed"
     language: Literal["en", "vi"] = "en"
+    reference_answer: str = ""
+    split: Literal["development", "test"] = "development"
 
 
 def load_cases(path: Path) -> list[Case]:
@@ -67,7 +69,13 @@ def load_cases(path: Path) -> list[Case]:
 
 
 async def benchmark(
-    dataset: Path, *, live: bool, profile: str, max_rounds: int
+    dataset: Path,
+    *,
+    live: bool,
+    profile: str,
+    max_rounds: int,
+    orchestration_mode: Literal["fixed", "adaptive", "autonomous"] = "fixed",
+    overrides: dict[str, object] | None = None,
 ) -> dict[str, object]:
     cases = await asyncio.to_thread(load_cases, dataset)
     dataset_bytes = await asyncio.to_thread(dataset.read_bytes)
@@ -77,7 +85,28 @@ async def benchmark(
             "data_dir": Path(directory),
             "cache_enabled": False,
             "workflow_profile": profile,
+            "orchestration_mode": orchestration_mode,
         }
+        allowed = {
+            "llm_model",
+            "agent_routes",
+            "embedding_provider",
+            "embedding_model",
+            "local_device",
+            "reranker_provider",
+            "reranker_model",
+            "reranker_device",
+            "rerank_candidates",
+            "chunk_strategy",
+            "chunk_tokens",
+            "chunk_token_overlap",
+            "semantic_min_score",
+            "llm_max_calls",
+            "llm_max_total_tokens",
+        }
+        if set(overrides or {}) - allowed:
+            raise ValueError("Benchmark overrides must contain only public quality settings")
+        options.update(overrides or {})
         if not live:
             options.update(
                 llm_provider="demo",
@@ -86,7 +115,13 @@ async def benchmark(
                 # Override every role explicitly so an offline benchmark cannot call an API.
                 agent_routes={
                     role: {"provider": "demo", "model": "extractive-demo"}
-                    for role in ("retrieval", "reader", "summarizer", "fact_checker", "writer")
+                    for role in (
+                        "retrieval",
+                        "reader",
+                        "summarizer",
+                        "fact_checker",
+                        "writer",
+                    )
                 },
                 embedding_provider="none",
                 reranker_provider="none",
@@ -126,6 +161,8 @@ async def benchmark(
                     "status": finished.status,
                     "label_source": case.label_source,
                     "answerable": case.answerable,
+                    "reference_answer": case.reference_answer,
+                    "split": case.split,
                 }
                 if finished.result:
                     result = finished.result
@@ -174,11 +211,17 @@ async def benchmark(
                 "configuration": {
                     "live": live,
                     "profile": profile,
+                    "orchestration_mode": orchestration_mode,
                     "max_rounds": max_rounds,
                     "provider": container.router.name,
                     "model": container.router.model,
                     "embedding_fingerprint": container.embedder.fingerprint,
                     "reranker": settings.reranker_model or None,
+                    "routes": container.router.public_routes(),
+                    "reranker_provider": settings.resolved_reranker_provider,
+                    "rerank_candidates": settings.rerank_candidates,
+                    "chunk_strategy": settings.chunk_strategy,
+                    "chunk_tokens": settings.chunk_tokens,
                 },
                 "summary": {
                     "cases": len(rows),
@@ -207,14 +250,27 @@ def main() -> None:
     parser.add_argument("--dataset", type=Path, default=Path("examples/benchmark/cases.jsonl"))
     parser.add_argument("--output", type=Path, default=Path("evaluation/system.json"))
     parser.add_argument(
+        "--settings", type=Path, help="Public quality overrides as JSON; keys stay in .env"
+    )
+    parser.add_argument(
         "--live", action="store_true", help="Use configured providers/models; may incur API charges"
     )
     parser.add_argument("--profile", choices=["balanced", "academic"], default="balanced")
     parser.add_argument("--max-rounds", type=int, choices=[1, 2], default=1)
+    parser.add_argument(
+        "--orchestration-mode", choices=["fixed", "adaptive", "autonomous"], default="fixed"
+    )
     args = parser.parse_args()
     result = asyncio.run(
         benchmark(
-            args.dataset.resolve(), live=args.live, profile=args.profile, max_rounds=args.max_rounds
+            args.dataset.resolve(),
+            live=args.live,
+            profile=args.profile,
+            max_rounds=args.max_rounds,
+            orchestration_mode=args.orchestration_mode,
+            overrides=json.loads(args.settings.read_text(encoding="utf-8"))
+            if args.settings
+            else None,
         )
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
