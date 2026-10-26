@@ -294,6 +294,22 @@ class RuntimeTask(TaskRequest):
     message: str = ""
 
 
+class PeerFeedback(Contract):
+    recipient: WorkerRole
+    message: str = Field(min_length=8, max_length=1000)
+
+
+class AgentBrief(Contract):
+    approach: str = Field(min_length=8, max_length=1000)
+    feedback: list[PeerFeedback] = Field(default_factory=list, max_length=3)
+
+
+class PeerMessage(PeerFeedback):
+    id: str
+    sender: WorkerRole
+    task_id: str | None = None
+
+
 class ToolArguments(Contract):
     queries: list[str] = Field(default_factory=list, max_length=4)
     search_mode: Literal["lexical", "hybrid"] | None = None
@@ -302,6 +318,8 @@ class ToolArguments(Contract):
     claim_ids: list[str] = Field(default_factory=list, max_length=16)
     task_id: str | None = None
     task: TaskRequest | None = None
+    recipient: WorkerRole | None = None
+    message: str | None = Field(default=None, min_length=8, max_length=1000)
 
     @field_validator("queries")
     @classmethod
@@ -381,6 +399,8 @@ class ResearchResult(Contract):
     elapsed_ms: float
     rounds: int
     warnings: list[str] = Field(default_factory=list)
+    agent_plans: dict[str, str] = Field(default_factory=dict)
+    peer_messages: list[PeerMessage] = Field(default_factory=list)
     created_at: str
     requirements: list[Requirement] = Field(default_factory=list)
     coverage: list[CoverageCheck] = Field(default_factory=list)

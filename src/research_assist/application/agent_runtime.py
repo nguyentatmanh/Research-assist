@@ -5,6 +5,7 @@ import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
@@ -26,6 +27,10 @@ class Step(Protocol):
         work: Awaitable[R],
         describe: Callable[[R], dict[str, object]] | None = None,
     ) -> Awaitable[R]: ...
+
+
+class GuardedAction(Protocol):
+    def __call__(self, work: Callable[[], Awaitable[R]], expected: str) -> Awaitable[R]: ...
 
 
 @dataclass(frozen=True)
@@ -68,6 +73,7 @@ class AgentRuntime:
         step: Step,
         event: Event,
         bound_result: Callable[[], T | None] | None = None,
+        guard: GuardedAction | None = None,
     ) -> None:
         registry = {tool.name: tool for tool in tools}
         session.status = "running"
@@ -93,7 +99,14 @@ class AgentRuntime:
             # A source handoff at the search bound is local bookkeeping, not factual synthesis.
             bounded = bound_result() if bound_result else None
             if bounded is not None:
-                await accept(bounded)
+                if guard is None:
+                    await accept(bounded)
+                else:
+                    try:
+                        await guard(partial(accept, bounded), revision())
+                    except ActionRejected as exc:
+                        remember("rejected", {"error": str(exc), "action": "handoff"})
+                        continue
                 session.status, session.message = (
                     "completed",
                     "Đã bàn giao nguồn ở giới hạn tìm kiếm.",
@@ -103,6 +116,7 @@ class AgentRuntime:
             if session.steps >= self.max_steps:
                 break
             session.steps += 1
+            observed_revision = revision()
             decision = await step(
                 session.role,
                 "Tự chọn hành động tiếp theo cho nhiệm vụ.",
@@ -165,10 +179,19 @@ class AgentRuntime:
             ):
                 args.pop("task_id", None)
             try:
+                if guard is not None and revision() != observed_revision:
+                    raise ActionRejected(
+                        "Source artifacts changed while deciding. Inspect the current context "
+                        "and revise the action; the stale result was not applied."
+                    )
                 if decision.action == "finish":
                     if decision.result is None or decision.tool is not None or args:
                         raise ActionRejected("Finish needs a result and no tool arguments.")
-                    await accept(decision.result)
+                    result = decision.result
+                    if guard is None:
+                        await accept(result)
+                    else:
+                        await guard(lambda result=result: accept(result), observed_revision)
                     session.status, session.message = "completed", decision.reason
                     remember("finish", {"message": decision.reason})
                     return
@@ -213,7 +236,13 @@ class AgentRuntime:
                     arguments=args,
                 )
                 try:
-                    latest = await tool.execute(arguments)
+                    if guard is None:
+                        latest = await tool.execute(arguments)
+                    else:
+                        latest = await guard(
+                            partial(tool.execute, arguments),
+                            observed_revision,
+                        )
                 except BudgetExceeded:
                     session.status = "blocked"
                     raise

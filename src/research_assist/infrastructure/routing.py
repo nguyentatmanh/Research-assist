@@ -19,12 +19,19 @@ from research_assist.domain.ports import LanguageModel, T
 from research_assist.infrastructure.llm import (
     DemoLanguageModel,
     HTTPLanguageModel,
+    Usage,
+    current_call_usage,
     current_usage,
     provider_event,
 )
 from research_assist.infrastructure.repository import Repository
 
 TASK_ROLES: dict[str, AgentRole] = {
+    "retrieval_brief": "retrieval",
+    "reader_brief": "reader",
+    "summarizer_brief": "summarizer",
+    "fact_checker_brief": "fact_checker",
+    "writer_brief": "writer",
     "retrieval_step": "retrieval",
     "reader_step": "reader",
     "summarizer_step": "summarizer",
@@ -136,14 +143,13 @@ class ModelRouter:
         role = TASK_ROLES[task]
         model, route = self.models[role], self.routes[role]
         mode = self.execution(role)
-        if task in {"question_plan", "retrieval_action"} or task.endswith("_step"):
+        if task in {"question_plan", "retrieval_action"} or task.endswith(("_step", "_brief")):
             mode = "demo" if model.name == "demo" else "api"
         usage = current_usage.get()
-        before = (usage.calls, usage.input_tokens, usage.output_tokens) if usage else (0, 0, 0)
+        call_usage = Usage()
+        call_token = current_call_usage.set(call_usage)
         begin, hit = time.perf_counter(), False
         used_models = [model.model]
-        diagnostic_start = len(usage.provider_events) if usage else 0
-        missing_before = usage.missing_usage if usage else 0
         try:
             if mode == "local":
                 return schema.model_validate(fallback().model_dump())
@@ -257,7 +263,7 @@ class ModelRouter:
                     used_models = list(
                         dict.fromkeys(
                             str(event["model"])
-                            for event in usage.provider_events[diagnostic_start:]
+                            for event in call_usage.provider_events
                             if event["kind"] in {"http_attempt", "network_error"}
                             and "model" in event
                         )
@@ -272,9 +278,9 @@ class ModelRouter:
                     ),
                 )
                 calls, inputs, outputs = (
-                    usage.calls - before[0],
-                    usage.input_tokens - before[1],
-                    usage.output_tokens - before[2],
+                    call_usage.calls,
+                    call_usage.input_tokens,
+                    call_usage.output_tokens,
                 )
                 entry.calls += calls
                 entry.input_tokens += inputs
@@ -292,7 +298,7 @@ class ModelRouter:
                 elif (
                     prices.input_usd_per_million is not None
                     and prices.output_usd_per_million is not None
-                    and usage.missing_usage == missing_before
+                    and call_usage.missing_usage == 0
                     and entry.models_used == [self.models[role].model]
                 ):
                     entry.estimated_cost_usd = (entry.estimated_cost_usd or 0.0) + (
@@ -301,3 +307,4 @@ class ModelRouter:
                     ) / 1_000_000
                 else:
                     entry.estimated_cost_usd = None
+            current_call_usage.reset(call_token)

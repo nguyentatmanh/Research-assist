@@ -177,6 +177,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "agent_max_steps": settings.agent_max_steps,
             "autonomous_max_steps": settings.autonomous_max_steps,
             "autonomous_max_tasks": settings.autonomous_max_tasks,
+            "autonomous_parallelism": settings.autonomous_parallelism,
+            "autonomous_team_planning": settings.autonomous_team_planning,
             "agent_routes": container.router.public_routes(),
             "cache_enabled": settings.cache_enabled,
             "llm_max_calls": settings.llm_max_calls,
@@ -198,7 +200,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "agent_max_steps": settings.agent_max_steps,
                 "execution": "local",
                 "agent_count": 5,
-                "pattern": "five independent agent tool loops with code scheduling"
+                "parallelism": settings.autonomous_parallelism,
+                "team_planning": settings.autonomous_team_planning,
+                "pattern": "concurrent agent tasks with versioned evidence and peer feedback"
                 if settings.orchestration_mode == "autonomous"
                 else "code scheduling with typed evidence feedback",
             },

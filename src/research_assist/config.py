@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     agent_max_steps: int = Field(default=6, ge=1, le=16)
     autonomous_max_steps: int = Field(default=16, ge=1, le=32)
     autonomous_max_tasks: int = Field(default=16, ge=1, le=32)
+    autonomous_parallelism: int = Field(default=5, ge=1, le=5)
+    autonomous_team_planning: bool = False
     agent_routes: dict[AgentRole, AgentRoute] = Field(default_factory=dict)
     gemini_api_key: SecretStr = SecretStr("")
     gemini_fallback_model: str = ""

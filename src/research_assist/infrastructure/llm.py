@@ -40,13 +40,28 @@ class Usage:
 
 
 current_usage: ContextVar[Usage | None] = ContextVar("research_usage", default=None)
+current_call_usage: ContextVar[Usage | None] = ContextVar("research_call_usage", default=None)
+current_step_events: ContextVar[list[dict[str, object]] | None] = ContextVar(
+    "research_step_events", default=None
+)
+
+
+def record_tokens(inputs: int, outputs: int, missing: bool) -> None:
+    for usage in (current_usage.get(), current_call_usage.get()):
+        if usage is not None:
+            usage.input_tokens += max(0, inputs)
+            usage.output_tokens += max(0, outputs)
+            usage.missing_usage += int(missing)
 
 
 def provider_event(task: str, kind: str, **details: object) -> None:
     """Safe retry metadata only: never response bodies, source text, keys or headers."""
-    usage = current_usage.get()
-    if usage is not None:
-        usage.provider_events.append({"task": task, "kind": kind, **details})
+    for usage in (current_usage.get(), current_call_usage.get()):
+        if usage is not None:
+            usage.provider_events.append({"task": task, "kind": kind, **details})
+    events = current_step_events.get()
+    if events is not None:
+        events.append({"task": task, "kind": kind, **details})
 
 
 @contextmanager
@@ -285,11 +300,12 @@ class HTTPLanguageModel:
             if self.name == "gemini":
                 if usage:
                     info = data.get("usageMetadata", {})
-                    if "promptTokenCount" not in info or "candidatesTokenCount" not in info:
-                        usage.missing_usage += 1
-                    usage.input_tokens += max(0, int(info.get("promptTokenCount", 0)))
-                    usage.output_tokens += max(0, int(info.get("candidatesTokenCount", 0)))
-                    usage.output_tokens += max(0, int(info.get("thoughtsTokenCount", 0)))
+                    record_tokens(
+                        int(info.get("promptTokenCount", 0)),
+                        max(0, int(info.get("candidatesTokenCount", 0)))
+                        + max(0, int(info.get("thoughtsTokenCount", 0))),
+                        "promptTokenCount" not in info or "candidatesTokenCount" not in info,
+                    )
                 feedback = data.get("promptFeedback") or {}
                 if feedback.get("blockReason") not in (None, "BLOCK_REASON_UNSPECIFIED"):
                     reason = feedback["blockReason"]
@@ -349,10 +365,11 @@ class HTTPLanguageModel:
             else:
                 if usage:
                     info = data.get("usage") or {}
-                    if "prompt_tokens" not in info or "completion_tokens" not in info:
-                        usage.missing_usage += 1
-                    usage.input_tokens += max(0, int(info.get("prompt_tokens", 0)))
-                    usage.output_tokens += max(0, int(info.get("completion_tokens", 0)))
+                    record_tokens(
+                        int(info.get("prompt_tokens", 0)),
+                        int(info.get("completion_tokens", 0)),
+                        "prompt_tokens" not in info or "completion_tokens" not in info,
+                    )
                 choice = data["choices"][0]
                 if choice.get("finish_reason") not in (None, "stop"):
                     raise ProviderError("Model dừng sớm. Tăng giới hạn output hoặc giảm top_k.")
@@ -394,7 +411,16 @@ class HTTPLanguageModel:
                     elapsed_ms=round((time.perf_counter() - gate_begin) * 1000, 2),
                 )
             if usage:
+                # Recheck after pacing: several concurrent calls may have waited together.
+                # No await separates this reservation from the limit checks.
+                if usage.calls >= self.settings.llm_max_calls:
+                    raise BudgetExceeded("Đã đạt ngân sách số lần gọi model cho phiên này.")
+                if usage.input_tokens + usage.output_tokens >= self.settings.llm_max_total_tokens:
+                    raise BudgetExceeded("Đã đạt ngân sách token cho phiên này.")
                 usage.calls += 1
+                call_usage = current_call_usage.get()
+                if call_usage is not None:
+                    call_usage.calls += 1
             try:
                 http_begin = time.perf_counter()
                 response = await self.client.post(endpoint, headers=headers, json=body)

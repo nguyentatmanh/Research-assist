@@ -12,6 +12,7 @@ from research_assist.domain.models import (
     Evidence,
     EvidenceGap,
     FollowUpRequest,
+    PeerMessage,
     RetrievedChunk,
     RuntimeTask,
     WriterOutput,
@@ -36,6 +37,8 @@ class ResearchState:
     task_graph: dict[str, RuntimeTask] = field(default_factory=dict)
     sessions: dict[str, AgentSession] = field(default_factory=dict)
     report_layout: WriterOutput | None = None
+    agent_plans: dict[str, str] = field(default_factory=dict)
+    peer_messages: list[PeerMessage] = field(default_factory=list)
     checkpoint: Callable[[], Awaitable[None]] | None = None
 
     async def save_checkpoint(self) -> None:

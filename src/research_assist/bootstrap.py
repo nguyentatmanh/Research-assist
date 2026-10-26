@@ -96,6 +96,8 @@ def build_container(
         settings.agent_max_steps,
         settings.autonomous_max_steps,
         settings.autonomous_max_tasks,
+        settings.autonomous_parallelism,
+        settings.autonomous_team_planning,
     )
     return Container(
         settings,

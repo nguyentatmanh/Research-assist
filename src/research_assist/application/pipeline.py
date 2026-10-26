@@ -30,7 +30,7 @@ from research_assist.domain.models import (
 )
 from research_assist.domain.ports import LanguageModel
 from research_assist.domain.workflow import decide_next
-from research_assist.infrastructure.llm import current_usage, usage_scope
+from research_assist.infrastructure.llm import current_step_events, current_usage, usage_scope
 from research_assist.infrastructure.repository import now
 
 T = TypeVar("T")
@@ -64,6 +64,8 @@ class ResearchPipeline:
         agent_max_steps: int = 6,
         autonomous_max_steps: int = 16,
         autonomous_max_tasks: int = 16,
+        autonomous_parallelism: int = 5,
+        autonomous_team_planning: bool = False,
     ) -> None:
         self.llm, self.retrieval, self.reader = llm, retrieval, reader
         self.summarizer, self.checker, self.writer = summarizer, checker, writer
@@ -74,6 +76,8 @@ class ResearchPipeline:
         self.agent_max_steps = agent_max_steps
         self.autonomous_max_steps = autonomous_max_steps
         self.autonomous_max_tasks = autonomous_max_tasks
+        self.autonomous_parallelism = autonomous_parallelism
+        self.autonomous_team_planning = autonomous_team_planning
 
     async def run(
         self,
@@ -116,15 +120,16 @@ class ResearchPipeline:
             event(agent, "running", message)
             begin = time.perf_counter()
             usage = current_usage.get()
-            diagnostic_start = len(usage.provider_events) if usage else 0
+            diagnostics: list[dict[str, object]] = []
+            diagnostic_token = current_step_events.set(diagnostics)
             previous_ms = usage.agents[agent].elapsed_ms if usage and agent in usage.agents else 0.0
             try:
                 value = await work
             except Exception:
                 details: dict[str, object] = {}
                 if usage:
-                    if len(usage.provider_events) > diagnostic_start:
-                        details["provider_attempts"] = usage.provider_events[diagnostic_start:]
+                    if diagnostics:
+                        details["provider_attempts"] = diagnostics
                     details.update(
                         session_input_tokens=usage.input_tokens,
                         session_output_tokens=usage.output_tokens,
@@ -144,10 +149,12 @@ class ResearchPipeline:
                     **details,
                 )
                 raise
+            finally:
+                current_step_events.reset(diagnostic_token)
             elapsed = (time.perf_counter() - begin) * 1000
             details = {}
-            if usage and len(usage.provider_events) > diagnostic_start:
-                details["provider_attempts"] = usage.provider_events[diagnostic_start:]
+            if diagnostics:
+                details["provider_attempts"] = diagnostics
             if usage and agent in usage.agents:
                 entry = usage.agents[agent]
                 entry.elapsed_ms = round(previous_ms + elapsed, 2)
@@ -230,6 +237,8 @@ class ResearchPipeline:
                     orchestration_mode=mode,
                     task_graph=list(state.task_graph.values()),
                     agent_sessions=list(state.sessions.values()),
+                    agent_plans=dict(state.agent_plans),
+                    peer_messages=list(state.peer_messages),
                 ).model_copy(deep=True)
                 on_checkpoint(saved)
 
@@ -289,6 +298,8 @@ class ResearchPipeline:
                         self.agent_max_steps,
                         self.autonomous_max_steps,
                         self.autonomous_max_tasks,
+                        self.autonomous_parallelism,
+                        self.autonomous_team_planning,
                     )
                     await autonomous.run(
                         request,
@@ -443,6 +454,8 @@ class ResearchPipeline:
                 elapsed_ms=round((time.perf_counter() - started) * 1000, 2),
                 rounds=round_number,
                 warnings=list(dict.fromkeys(warnings)),
+                agent_plans=dict(state.agent_plans),
+                peer_messages=list(state.peer_messages),
                 created_at=now(),
                 profile=request.profile or self.profile,
                 cache_hits=usage.cache_hits,
