@@ -216,6 +216,19 @@ export function renderEvents(events, status, result = null) {
       ),
     );
     content.append(el("p", "", event.message));
+    const peer = event.details?.peer_message;
+    if (peer) {
+      content.append(
+        el(
+          "p",
+          "",
+          `${agentLabels[peer.sender] || peer.sender} → ${agentLabels[peer.recipient] || peer.recipient}: ${peer.message}`,
+        ),
+      );
+    }
+    if (event.details?.phase === "team_planning" && event.details.approach) {
+      content.append(el("p", "", event.details.approach));
+    }
     if (event.details && Object.keys(event.details).length) {
       const facts = el("div", "trace-facts");
       for (const name of [
