@@ -160,6 +160,7 @@ class Evidence(RawEvidence):
     start: int
     end: int
     regions: list[SourceRegion] = Field(default_factory=list)
+    document_version: str = ""
 
 
 class RawClaim(Contract):
@@ -274,7 +275,17 @@ RuntimeRole = WorkerRole
 TaskRequester = Literal[
     "retrieval", "reader", "summarizer", "fact_checker", "writer", "orchestrator", "supervisor"
 ]
-TaskStatus = Literal["pending", "running", "waiting", "completed", "blocked", "cancelled"]
+TaskStatus = Literal[
+    "pending",
+    "running",
+    "waiting",
+    "retry_waiting",
+    "completed",
+    "blocked",
+    "failed",
+    "cancelled",
+    "skipped",
+]
 
 
 class TaskRequest(Contract):
@@ -284,6 +295,9 @@ class TaskRequest(Contract):
     claim_ids: list[str] = Field(default_factory=list, max_length=16)
     chunk_ids: list[str] = Field(default_factory=list, max_length=12)
     depends_on: list[str] = Field(default_factory=list, max_length=16)
+    dependency_conditions: dict[str, Literal["ON_SUCCESS", "ON_TERMINAL"]] = Field(
+        default_factory=dict
+    )
 
 
 class RuntimeTask(TaskRequest):
@@ -292,6 +306,60 @@ class RuntimeTask(TaskRequest):
     parent_id: str | None = None
     status: TaskStatus = "pending"
     message: str = ""
+    generation: int = 0
+    attempts: int = 0
+
+
+class TaskScope(Contract):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    task_id: str
+    requirement_ids: tuple[str, ...]
+    allowed_document_ids: tuple[str, ...]
+    allowed_chunk_ids: tuple[str, ...] = ()
+    scope_version: str = "0"
+
+
+class TaskBudget(Contract):
+    max_search_calls: int = Field(default=2, ge=1)
+    max_model_calls: int = Field(default=6, ge=1)
+    max_tokens: int = Field(default=20000, ge=1)
+    search_calls: int = 0
+    model_calls: int = 0
+    tokens: int = 0
+    reserved_tokens: int = 0
+
+
+class ResearchTaskState(Contract):
+    task_id: str
+    scope: TaskScope
+    budget: TaskBudget = Field(default_factory=TaskBudget)
+    chunk_ids: list[str] = Field(default_factory=list)
+    inspected_chunk_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    source_fingerprint: str = ""
+    warnings: list[str] = Field(default_factory=list)
+    scope_history: list[TaskScope] = Field(default_factory=list)
+    committed_actions: list[str] = Field(default_factory=list)
+
+
+class EvidenceUsage(Contract):
+    evidence_id: str
+    task_id: str
+    requirement_id: str
+
+
+class ClaimEvidenceLink(Contract):
+    claim_id: str
+    evidence_id: str
+    relation: Literal["support", "contradiction"] = "support"
+
+
+class CitationAudit(Contract):
+    status: Literal["passed", "not_applicable"] = "not_applicable"
+    snapshot: str = ""
+    accepted_claim_ids: list[str] = Field(default_factory=list)
+    rejected_claim_ids: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
 
 
 class PeerFeedback(Contract):
@@ -417,6 +485,11 @@ class ResearchResult(Contract):
     agent_tasks: list[AgentTask] = Field(default_factory=list)
     task_graph: list[RuntimeTask] = Field(default_factory=list)
     agent_sessions: list[AgentSession] = Field(default_factory=list)
+    report_status: Literal["complete", "partial", "abstained"] = "abstained"
+    citation_audit: CitationAudit = Field(default_factory=CitationAudit)
+    research_tasks: list[ResearchTaskState] = Field(default_factory=list)
+    evidence_usages: list[EvidenceUsage] = Field(default_factory=list)
+    claim_evidence_links: list[ClaimEvidenceLink] = Field(default_factory=list)
 
 
 class RunRecord(Contract):

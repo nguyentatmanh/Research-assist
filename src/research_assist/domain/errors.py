@@ -22,6 +22,10 @@ class ActionRejected(ResearchError):
     """Safe feedback for an agent to repair an invalid action or unmet dependency."""
 
 
+class TaskBudgetExceeded(ProviderError):
+    """A task-local budget is exhausted; independent tasks may continue."""
+
+
 class NotFoundError(ResearchError):
     pass
 
