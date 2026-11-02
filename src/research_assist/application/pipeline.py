@@ -9,6 +9,7 @@ from research_assist.agents.summarizer import SummarizerAgent
 from research_assist.agents.writer import WriterAgent, escape_markdown
 from research_assist.application.adaptive import AdaptiveCoordinator
 from research_assist.application.autonomous import AutonomousCoordinator
+from research_assist.application.parallel_research import ParallelResearchCoordinator
 from research_assist.application.research_state import ResearchState
 from research_assist.domain.coverage import (
     gap_messages,
@@ -66,6 +67,9 @@ class ResearchPipeline:
         autonomous_max_tasks: int = 16,
         autonomous_parallelism: int = 5,
         autonomous_team_planning: bool = False,
+        parallel_task_retries: int = 1,
+        parallel_task_max_calls: int = 6,
+        parallel_task_max_tokens: int = 30000,
     ) -> None:
         self.llm, self.retrieval, self.reader = llm, retrieval, reader
         self.summarizer, self.checker, self.writer = summarizer, checker, writer
@@ -78,6 +82,9 @@ class ResearchPipeline:
         self.autonomous_max_tasks = autonomous_max_tasks
         self.autonomous_parallelism = autonomous_parallelism
         self.autonomous_team_planning = autonomous_team_planning
+        self.parallel_task_retries = parallel_task_retries
+        self.parallel_task_max_calls = parallel_task_max_calls
+        self.parallel_task_max_tokens = parallel_task_max_tokens
 
     async def run(
         self,
@@ -88,6 +95,7 @@ class ResearchPipeline:
     ) -> ResearchResult:
         started = time.perf_counter()
         state = ResearchState()
+        parallel: ParallelResearchCoordinator | None = None
         events: list[AgentEvent] = []
         mode = request.orchestration_mode or self.orchestration_mode
 
@@ -193,6 +201,8 @@ class ResearchPipeline:
             async def checkpoint() -> None:
                 if on_checkpoint is None or not any(c.verdict == "supported" for c in state.checks):
                     return
+                if parallel is not None:
+                    parallel.audit_now()
                 report = await self.writer.compose(
                     planned_request,
                     state.claims,
@@ -239,6 +249,21 @@ class ResearchPipeline:
                     agent_sessions=list(state.sessions.values()),
                     agent_plans=dict(state.agent_plans),
                     peer_messages=list(state.peer_messages),
+                    report_status=(
+                        "complete"
+                        if state.coverage
+                        and all(
+                            c.status == "covered"
+                            for c in report_coverage(state.coverage, report.claim_ids)
+                        )
+                        else "partial"
+                    )
+                    if report.claim_ids
+                    else "abstained",
+                    citation_audit=state.citation_audit,
+                    research_tasks=list(state.research_tasks.values()),
+                    evidence_usages=state.evidence_usages,
+                    claim_evidence_links=state.claim_evidence_links,
                 ).model_copy(deep=True)
                 on_checkpoint(saved)
 
@@ -287,7 +312,22 @@ class ResearchPipeline:
                     update={"requirements": [a.text for a in question_plan.aspects]}
                 )
                 state.coverage = validate_coverage(requirements_for(planned_request), [], [])
-                if mode == "autonomous":
+                if mode == "autonomous" and len(request.requirements) == 2:
+                    parallel = ParallelResearchCoordinator(
+                        self.retrieval,
+                        self.reader,
+                        self.summarizer,
+                        self.checker,
+                        self.writer,
+                        self.autonomous_parallelism,
+                        self.autonomous_max_tasks,
+                        self.autonomous_max_steps,
+                        self.parallel_task_retries,
+                        self.parallel_task_max_calls,
+                        self.parallel_task_max_tokens,
+                    )
+                    await parallel.run(planned_request, question_plan, state, step, event)
+                elif mode == "autonomous":
                     autonomous = AutonomousCoordinator(
                         self.llm,
                         self.retrieval,
@@ -339,6 +379,8 @@ class ResearchPipeline:
                         estimated_cost_usd=0.0,
                     ),
                 )
+            if parallel is not None:
+                parallel.audit_now()
             try:
                 report = await step(
                     "writer",
@@ -418,6 +460,37 @@ class ResearchPipeline:
                 ),
             ]
             markdown = report.markdown + "\n".join(coverage_lines) + "\n"
+            report_status: Literal["complete", "partial", "abstained"] = (
+                (
+                    "complete"
+                    if coverage and all(c.status == "covered" for c in coverage)
+                    else "partial"
+                )
+                if report.claim_ids
+                else "abstained"
+            )
+            if parallel is not None:
+                labels_status = {
+                    "complete": "Đầy đủ",
+                    "partial": "Một phần",
+                    "abstained": "Chưa đủ cơ sở",
+                }
+                markdown += "\n## " + ("Research status" if en else "Trạng thái nghiên cứu")
+                markdown += (
+                    "\n\n" + (report_status if en else labels_status[report_status]) + "\n\n"
+                )
+                for requirement in requirements:
+                    tasks = [
+                        t
+                        for t in state.task_graph.values()
+                        if t.requirement_ids == [requirement.id]
+                    ]
+                    attempts = ", ".join(f"{t.role}: {t.attempts}" for t in tasks)
+                    reasons = "; ".join(dict.fromkeys(t.message for t in tasks if t.message))
+                    markdown += "- " + escape_markdown(requirement.text) + ": " + attempts
+                    if reasons:
+                        markdown += " — " + escape_markdown(reasons)
+                    markdown += "\n"
             if usage.missing_usage:
                 warnings.append(
                     "Một số phản hồi thiếu thống kê token; số token hiển thị chưa đầy đủ."
@@ -466,6 +539,11 @@ class ResearchPipeline:
                     and all(e.estimated_cost_usd is not None for e in usage.agents.values())
                     else None
                 ),
+                report_status=report_status,
+                citation_audit=state.citation_audit,
+                research_tasks=list(state.research_tasks.values()),
+                evidence_usages=state.evidence_usages,
+                claim_evidence_links=state.claim_evidence_links,
             )
         return result.model_copy(
             update={

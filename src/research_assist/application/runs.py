@@ -139,8 +139,8 @@ class RunManager:
                         *run.result.agent_sessions,
                     ]
                     for item in interrupted:
-                        if item.status in {"pending", "running", "waiting"}:
-                            item.status = "blocked"
+                        if item.status in {"pending", "running", "waiting", "retry_waiting"}:
+                            item.status = "cancelled" if run.result.research_tasks else "blocked"
                 run.result.events = list(run.events)
             self.repository.save_run(run)
             self.tasks.pop(run.id, None)

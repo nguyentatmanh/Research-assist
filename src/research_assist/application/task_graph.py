@@ -3,6 +3,8 @@
 from research_assist.domain.errors import ActionRejected
 from research_assist.domain.models import RuntimeTask, TaskRequest, TaskRequester
 
+TERMINAL = frozenset({"completed", "blocked", "failed", "cancelled", "skipped"})
+
 
 class TaskGraph:
     def __init__(self, tasks: dict[str, RuntimeTask], max_tasks: int) -> None:
@@ -13,7 +15,12 @@ class TaskGraph:
             t
             for t in self.tasks.values()
             if t.status in {"pending", "waiting"}
-            and all(self.tasks[dep].status == "completed" for dep in t.depends_on)
+            and all(
+                self.tasks[dep].status in TERMINAL
+                if t.dependency_conditions.get(dep) == "ON_TERMINAL"
+                else self.tasks[dep].status == "completed"
+                for dep in t.depends_on
+            )
         ]
 
     def add(
@@ -26,6 +33,8 @@ class TaskGraph:
             raise ActionRejected("Task graph reached its task limit.")
         if any(dep not in self.tasks for dep in request.depends_on):
             raise ActionRejected("Task dependency does not exist.")
+        if set(request.dependency_conditions) - set(request.depends_on):
+            raise ActionRejected("Dependency condition must name a prerequisite.")
         if len(set(request.depends_on)) != len(request.depends_on):
             raise ActionRejected("Task dependencies must be unique.")
         if parent_id is not None and parent_id not in self.tasks:
@@ -76,7 +85,10 @@ class TaskGraph:
                 if task.status not in {"pending", "waiting"}:
                     continue
                 if any(
-                    self.tasks[dep].status in {"blocked", "cancelled"} for dep in task.depends_on
+                    self.tasks[dep].status in TERMINAL - {"completed"}
+                    and task.dependency_conditions.get(dep) != "ON_TERMINAL"
+                    for dep in task.depends_on
                 ):
-                    task.status, task.message = "blocked", "A prerequisite did not complete."
+                    task.status = "skipped" if task.dependency_conditions else "blocked"
+                    task.message = "A prerequisite did not complete successfully."
                     changed = True

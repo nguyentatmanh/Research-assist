@@ -6,13 +6,17 @@ from dataclasses import dataclass, field
 from research_assist.domain.models import (
     AgentSession,
     AgentTask,
+    CitationAudit,
     Claim,
     ClaimCheck,
+    ClaimEvidenceLink,
     CoverageCheck,
     Evidence,
     EvidenceGap,
+    EvidenceUsage,
     FollowUpRequest,
     PeerMessage,
+    ResearchTaskState,
     RetrievedChunk,
     RuntimeTask,
     WriterOutput,
@@ -40,6 +44,10 @@ class ResearchState:
     agent_plans: dict[str, str] = field(default_factory=dict)
     peer_messages: list[PeerMessage] = field(default_factory=list)
     checkpoint: Callable[[], Awaitable[None]] | None = None
+    research_tasks: dict[str, ResearchTaskState] = field(default_factory=dict)
+    evidence_usages: list[EvidenceUsage] = field(default_factory=list)
+    claim_evidence_links: list[ClaimEvidenceLink] = field(default_factory=list)
+    citation_audit: CitationAudit = field(default_factory=CitationAudit)
 
     async def save_checkpoint(self) -> None:
         if self.checkpoint is not None:

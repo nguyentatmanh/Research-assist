@@ -98,6 +98,9 @@ def build_container(
         settings.autonomous_max_tasks,
         settings.autonomous_parallelism,
         settings.autonomous_team_planning,
+        settings.parallel_task_retries,
+        settings.parallel_task_max_calls,
+        settings.parallel_task_max_tokens,
     )
     return Container(
         settings,

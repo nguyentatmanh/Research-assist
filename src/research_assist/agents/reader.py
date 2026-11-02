@@ -168,7 +168,7 @@ class ReaderAgent:
             if len(quote) > 1400:
                 rejected += 1
                 continue
-            key = (chunk.document_id, chunk.page, quote)
+            key = (chunk.document_id, chunk.page, chunk.start + span[0], chunk.start + span[1])
             if key in seen:
                 continue
             seen.add(key)
