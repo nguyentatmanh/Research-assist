@@ -92,6 +92,11 @@ class HybridSearch:
             "ranking_ms": self._ranking_ms,
         }
 
+    async def freeze(self, document_ids: list[str]) -> "FrozenSearch":
+        """Pin source text and vectors once for a research run, including context reads."""
+        snapshot = await self._snapshot(document_ids, self.embedder.fingerprint is not None)
+        return FrozenSearch(self, document_ids, snapshot)
+
     async def _query_vectors(self, queries: list[str]) -> list[list[float]]:
         async with self._query_lock:
             keys = [(self.embedder.fingerprint, query) for query in queries]
@@ -369,6 +374,39 @@ class NoReranker:
 
     async def rank(self, query: str, chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
         return chunks
+
+
+class FrozenSearch(HybridSearch):
+    """Run-owned adapter; uploads/reindexing cannot change a running source snapshot."""
+
+    def __init__(
+        self, original: HybridSearch, document_ids: list[str], snapshot: SearchSnapshot
+    ) -> None:
+        super().__init__(original.repository, original.embedder, original.settings.model_copy())
+        import hashlib
+        import json
+
+        self.document_ids = frozenset(document_ids)
+        self.snapshot = snapshot
+        self.frozen_chunks = {c.id: c.model_copy(deep=True) for c in snapshot.chunks}
+        self.source_versions = {
+            doc: hashlib.sha256(
+                json.dumps(
+                    [
+                        (c.id, c.page, c.start, c.end, c.text)
+                        for c in snapshot.chunks
+                        if c.document_id == doc
+                    ],
+                    ensure_ascii=False,
+                ).encode()
+            ).hexdigest()
+            for doc in document_ids
+        }
+
+    async def _snapshot(self, scope: list[str], use_dense: bool) -> SearchSnapshot:
+        if frozenset(scope) != self.document_ids:
+            raise ProviderError("Source scope differs from the frozen run snapshot.")
+        return self.snapshot
 
 
 class LocalReranker:

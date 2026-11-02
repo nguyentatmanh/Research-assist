@@ -18,9 +18,14 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from research_assist.config import Settings
-from research_assist.domain.errors import BudgetExceeded, ProviderError, ProviderUnavailable
+from research_assist.domain.errors import (
+    BudgetExceeded,
+    ProviderError,
+    ProviderUnavailable,
+    TaskBudgetExceeded,
+)
 from research_assist.domain.json_output import parse_object
-from research_assist.domain.models import AgentUsage
+from research_assist.domain.models import AgentUsage, TaskBudget
 from research_assist.domain.ports import T
 
 
@@ -37,9 +42,12 @@ class Usage:
     orchestration_mode: str | None = None
     provider_events: list[dict[str, object]] = field(default_factory=list)
     unavailable_models: set[tuple[str, str]] = field(default_factory=set)
+    reserved_tokens: int = 0
+    strict_reservations: bool = False
 
 
 current_usage: ContextVar[Usage | None] = ContextVar("research_usage", default=None)
+current_task_budget: ContextVar[TaskBudget | None] = ContextVar("task_budget", default=None)
 current_call_usage: ContextVar[Usage | None] = ContextVar("research_call_usage", default=None)
 current_step_events: ContextVar[list[dict[str, object]] | None] = ContextVar(
     "research_step_events", default=None
@@ -47,6 +55,9 @@ current_step_events: ContextVar[list[dict[str, object]] | None] = ContextVar(
 
 
 def record_tokens(inputs: int, outputs: int, missing: bool) -> None:
+    task_budget = current_task_budget.get()
+    if task_budget is not None:
+        task_budget.tokens += max(0, inputs) + max(0, outputs)
     for usage in (current_usage.get(), current_call_usage.get()):
         if usage is not None:
             usage.input_tokens += max(0, inputs)
@@ -293,7 +304,53 @@ class HTTPLanguageModel:
                 body["thinking"] = {
                     "type": "enabled" if self.settings.deepseek_thinking else "disabled"
                 }
-        response = await self._post(endpoint, headers, body, task=task)
+        usage = current_usage.get()
+        local = current_task_budget.get()
+        reserved = 0
+        if usage and usage.strict_reservations:
+            # UTF-8 bytes conservatively bound prompt tokens; reserve output as well.
+            reserved = len((system + user).encode()) + token_limit
+            if local and local.tokens + local.reserved_tokens + reserved > local.max_tokens:
+                raise TaskBudgetExceeded("Task token reservation exceeds its budget.")
+            if (
+                usage.input_tokens + usage.output_tokens + usage.reserved_tokens + reserved
+                > self.settings.llm_max_total_tokens
+            ):
+                raise BudgetExceeded("Run token reservation exceeds its budget.")
+            usage.reserved_tokens += reserved
+            if local:
+                local.reserved_tokens += reserved
+        try:
+            call_usage = current_call_usage.get()
+            calls_before = (
+                local.model_calls
+                if local
+                else call_usage.calls
+                if call_usage
+                else usage.calls
+                if usage
+                else 0
+            )
+            response = await self._post(endpoint, headers, body, task=task)
+        except BaseException:
+            # A sent request may still be billed after cancellation or transport failure.
+            calls_after = (
+                local.model_calls
+                if local
+                else call_usage.calls
+                if call_usage
+                else usage.calls
+                if usage
+                else 0
+            )
+            if reserved and usage is not None and calls_after > calls_before:
+                record_tokens(reserved, 0, True)
+            raise
+        finally:
+            if reserved and usage is not None:
+                usage.reserved_tokens -= reserved
+                if local:
+                    local.reserved_tokens -= reserved
         try:
             data = response.json()
             usage = current_usage.get()
@@ -418,6 +475,12 @@ class HTTPLanguageModel:
                 if usage.input_tokens + usage.output_tokens >= self.settings.llm_max_total_tokens:
                     raise BudgetExceeded("Đã đạt ngân sách token cho phiên này.")
                 usage.calls += 1
+                local_budget = current_task_budget.get()
+                if local_budget is not None:
+                    if local_budget.model_calls >= local_budget.max_model_calls:
+                        usage.calls -= 1
+                        raise TaskBudgetExceeded("Task model-call budget exhausted.")
+                    local_budget.model_calls += 1
                 call_usage = current_call_usage.get()
                 if call_usage is not None:
                     call_usage.calls += 1
