@@ -705,14 +705,16 @@ class AutonomousCoordinator:
             )[:12]
             return {"source_units": source_units(self._chunks([c.id for c in chunks]))}
 
-        async def section(args: ToolArguments) -> dict[str, object]:
+        async def open_source(args: ToolArguments, method_name: str) -> dict[str, object]:
             if not args.chunk_ids:
-                raise ActionRejected("A section must be anchored to observed chunk IDs.")
+                raise ActionRejected("Choose observed chunk IDs to open a source.")
             seeds = self._chunks(args.chunk_ids)
-            method = getattr(self.retrieval.search, "read_section", None)
+            method = getattr(self.retrieval.search, method_name, None)
             if method is None:
-                raise ActionRejected("This search adapter does not support section reading.")
+                raise ActionRejected("The search adapter does not support this source operation.")
             chunks = await method(seeds, self.request.document_ids)
+            if not chunks:
+                return {"source_units": []}
             self._remember_chunks(chunks)
             self.inspected[task.id] = list(
                 dict.fromkeys([c.id for c in chunks] + self.inspected.get(task.id, []))
@@ -819,7 +821,13 @@ class AutonomousCoordinator:
                 "read_section",
                 "Read a bounded portion of the same source section.",
                 frozenset({"chunk_ids"}),
-                section,
+                lambda args: open_source(args, "read_section"),
+            ),
+            "read_tables": AgentTool(
+                "read_tables",
+                "Read indexed tables on the physical PDF pages of observed chunks.",
+                frozenset({"chunk_ids"}),
+                lambda args: open_source(args, "read_tables"),
             ),
             "inspect_evidence": AgentTool(
                 "inspect_evidence",
@@ -860,7 +868,7 @@ class AutonomousCoordinator:
         }
         allowed = {
             "retrieval": ["search", "inspect_sources"],
-            "reader": ["read_units", "read_context", "read_section"],
+            "reader": ["read_units", "read_context", "read_section", "read_tables"],
             "summarizer": ["inspect_evidence", "inspect_claims"],
             "fact_checker": ["inspect_evidence", "inspect_claims", "check_numbers"],
             "writer": ["inspect_claims", "inspect_progress"],

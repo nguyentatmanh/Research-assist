@@ -21,9 +21,14 @@ class GoldAspect(Contract):
     text: str
     source: str
     passage: str = Field(min_length=20)
+    page: int | None = Field(default=None, ge=1)
+    row_label: str = ""
+    column_label: str = ""
+    expected_value: str = ""
 
 
 class Case(Contract):
+    category: Literal["single", "multi", "table", "unanswerable"] | None = None
     id: str = Field(min_length=1, max_length=80)
     question: str = Field(min_length=8, max_length=2000)
     requirements: list[str] = Field(default_factory=list, max_length=12)
@@ -47,6 +52,7 @@ def load_cases(path: Path) -> list[Case]:
     ]
     if not cases or len({c.id for c in cases}) != len(cases):
         raise ValueError("Cases must be nonempty and have unique IDs")
+    pages: dict[Path, list[tuple[int | None, str]]] = {}
     for case in cases:
         for name in case.files:
             file = (path.parent / name).resolve()
@@ -58,10 +64,16 @@ def load_cases(path: Path) -> list[Case]:
             from research_assist.infrastructure.documents import extract
 
             file = path.parent / aspect.source
-            source = "\n".join(
-                s.text for s in extract(file.read_bytes(), file.name, extraction_settings)
-            )
-            if " ".join(aspect.passage.split()) not in " ".join(source.split()):
+            if file not in pages:
+                pages[file] = [
+                    (s.page, " ".join(s.text.split()))
+                    for s in extract(file.read_bytes(), file.name, extraction_settings)
+                ]
+            if not any(
+                (aspect.page is None or aspect.page == page)
+                and " ".join(aspect.passage.split()) in body
+                for page, body in pages[file]
+            ):
                 raise ValueError("Gold passage does not occur in the annotated text source")
         if not set(case.relevant_sources).issubset({Path(f).name for f in case.files}):
             raise ValueError("Relevant sources must name files inside the case scope")
@@ -163,6 +175,8 @@ async def benchmark(
                     "answerable": case.answerable,
                     "reference_answer": case.reference_answer,
                     "split": case.split,
+                    "category": case.category,
+                    "gold_aspects": [a.model_dump() for a in case.gold_aspects],
                 }
                 if finished.result:
                     result = finished.result
@@ -181,6 +195,7 @@ async def benchmark(
                             sum(
                                 any(
                                     c.filename == Path(a.source).name
+                                    and (a.page is None or c.page == a.page)
                                     and " ".join(a.passage.split()) in " ".join(c.text.split())
                                     for c in result.retrieved
                                 )

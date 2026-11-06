@@ -25,6 +25,9 @@ class DocumentService:
         data: bytes,
         filename: str,
         on_progress: Callable[[str, dict[str, int]], None] | None = None,
+        *,
+        arxiv_id: str | None = None,
+        paper_title: str | None = None,
     ) -> tuple[Document, bool]:
         filename = safe_filename(filename)
 
@@ -37,6 +40,9 @@ class DocumentService:
             digest = hashlib.sha256(data).hexdigest()
             existing = self.repository.by_hash(digest)
             if existing:
+                if arxiv_id and existing.arxiv_id is None:
+                    existing.arxiv_id = arxiv_id
+                    self.repository.update_document_metadata(existing)
                 return existing, True
             report("extracting")
             sections = await asyncio.to_thread(extract, data, filename, self.settings)
@@ -52,7 +58,8 @@ class DocumentService:
             document = Document(
                 id=f"doc_{uuid4().hex}",
                 filename=filename,
-                title=title,
+                title=paper_title or title,
+                arxiv_id=arxiv_id,
                 kind=Path(filename).suffix.lower().lstrip("."),
                 sha256=digest,
                 page_count=len(sections) if Path(filename).suffix.lower() == ".pdf" else 0,

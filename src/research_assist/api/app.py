@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import FastAPI, File, Header, Request, UploadFile
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,6 +21,13 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from research_assist import __version__
 from research_assist.agents.catalog import public_specs
 from research_assist.api.upload_progress import UploadProgress
+from research_assist.application.embedding_settings import (
+    RemoteEmbeddingInput,
+    load_saved_settings,
+    persist_settings,
+    probe_endpoint,
+    settings_path,
+)
 from research_assist.bootstrap import Container, build_container
 from research_assist.config import Settings
 from research_assist.domain.errors import (
@@ -31,6 +40,7 @@ from research_assist.domain.errors import (
 from research_assist.domain.metadata import EVIDENCE_POLICY
 from research_assist.domain.models import ResearchRequest
 from research_assist.domain.ports import DiagnosticReranker
+from research_assist.infrastructure.arxiv import ArxivLibrary, Paper
 
 
 class LoginBody(BaseModel):
@@ -38,18 +48,34 @@ class LoginBody(BaseModel):
     token: str = Field(max_length=256)
 
 
+class PaperQuery(BaseModel):
+    query: str = Field(min_length=3, max_length=300)
+
+
+class PaperSelection(BaseModel):
+    paper_id: str = Field(min_length=6, max_length=80)
+
+
 def secure_equal(candidate: str, secret: str) -> bool:
     return hmac.compare_digest(candidate.encode("utf-8"), secret.encode("utf-8"))
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    settings = settings or Settings()
+    return _create_app(settings or Settings())
+
+
+def _create_app(settings: Settings) -> FastAPI:
+    original_settings = settings.model_copy(deep=True)
+    embedding_config_lock = asyncio.Lock()
     web = Path(__file__).resolve().parents[1] / "web"
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        nonlocal settings
+        settings = load_saved_settings(original_settings)
         container = build_container(settings)
         app.state.container = container
+        app.state.arxiv = ArxivLibrary(container.client)
         try:
             if settings.warmup_embedding:
                 try:
@@ -117,6 +143,90 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else 400
         )
         return JSONResponse({"detail": str(exc)}, status_code=status)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError) -> Response:
+        if request.url.path.startswith("/api/embedding/remote"):
+            # Do not echo submitted API keys through Pydantic's input diagnostics.
+            return JSONResponse({"detail": "Dữ liệu cấu hình GPU không hợp lệ."}, status_code=422)
+        return await request_validation_exception_handler(request, exc)
+
+    def remote_status(container: Container) -> dict[str, object]:
+        active = settings.embedding_provider == "remote"
+        chunks = container.repository.chunks()
+        reindex_needed = bool(
+            container.embedder.fingerprint
+            and any(
+                c.vector_model != container.embedder.fingerprint or not c.vector for c in chunks
+            )
+        )
+        return {
+            "active": active,
+            "saved": settings_path(original_settings).exists(),
+            "provider": settings.embedding_provider,
+            "base_url": settings.embedding_base_url if active else "",
+            "model_id": settings.embedding_model if active else "",
+            "model_family": (
+                "qwen3" if settings.embedding_model.startswith("research-qwen3-") else "e5"
+            )
+            if active
+            else "auto",
+            "key_configured": active and bool(settings.embedding_api_key.get_secret_value()),
+            "tokenizer_model": settings.chunk_tokenizer_model or "intfloat/multilingual-e5-base",
+            "batch_size": min(32, settings.embedding_batch_size) if active else 16,
+            "max_seq_length": settings.embedding_max_seq_length,
+            "reindex_needed": reindex_needed,
+            "document_count": len(container.repository.documents()),
+        }
+
+    def require_idle(container: Container) -> None:
+        if (
+            container.runs.busy
+            or container.documents.lock.locked()
+            or container.documents.maintenance
+        ):
+            raise CapacityError(
+                "Hãy chờ nghiên cứu hoặc cập nhật tài liệu hoàn tất trước khi đổi GPU."
+            )
+
+    @app.get("/api/embedding/remote")
+    async def get_remote_embedding(request: Request) -> dict[str, object]:
+        return remote_status(deps(request))
+
+    @app.post("/api/embedding/remote/test")
+    async def test_remote_embedding(
+        body: RemoteEmbeddingInput, request: Request
+    ) -> dict[str, object]:
+        _, info = await probe_endpoint(body, settings, deps(request).client)
+        return info
+
+    @app.put("/api/embedding/remote")
+    async def save_remote_embedding(
+        body: RemoteEmbeddingInput, request: Request
+    ) -> dict[str, object]:
+        nonlocal settings
+        container = deps(request)
+        async with embedding_config_lock:
+            require_idle(container)
+            candidate, info = await probe_endpoint(body, settings, container.client)
+            # Work may have started while the network check was in flight.
+            require_idle(container)
+            persist_settings(candidate)
+            container.configure_embeddings(candidate)
+            settings = candidate
+            return {**remote_status(container), "connection": info}
+
+    @app.delete("/api/embedding/remote")
+    async def restore_embedding(request: Request) -> dict[str, object]:
+        nonlocal settings
+        container = deps(request)
+        async with embedding_config_lock:
+            require_idle(container)
+            candidate = original_settings.model_copy(deep=True)
+            container.configure_embeddings(candidate)
+            settings_path(original_settings).unlink(missing_ok=True)
+            settings = candidate
+            return remote_status(container)
 
     @app.get("/api/health")
     async def health() -> dict[str, object]:
@@ -257,6 +367,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/documents")
     async def documents(request: Request) -> dict[str, object]:
         return {"documents": [d.model_dump() for d in deps(request).repository.documents()]}
+
+    @app.post("/api/papers/search")
+    async def find_papers(body: PaperQuery, request: Request) -> list[Paper]:
+        library: ArxivLibrary = request.app.state.arxiv
+        return await library.search(body.query)
+
+    @app.post("/api/papers/import", status_code=201)
+    async def import_paper(body: PaperSelection, request: Request) -> dict[str, object]:
+        library: ArxivLibrary = request.app.state.arxiv
+        paper = library.recent.get(body.paper_id)
+        if paper is None:
+            raise DocumentError("Hãy tìm lại bài báo và chọn phiên bản cần nhập.")
+        container = deps(request)
+        data = await library.pdf(paper.paper_id, container.settings.max_upload_mb * 1024 * 1024)
+        filename = "arxiv-" + paper.paper_id.replace("/", "-") + ".pdf"
+        document, duplicate = await container.documents.ingest(
+            data, filename, arxiv_id=paper.paper_id, paper_title=paper.title,
+        )
+        return {"document": document.model_dump(), "duplicate": duplicate}
 
     @app.post("/api/documents", status_code=201)
     async def upload(
