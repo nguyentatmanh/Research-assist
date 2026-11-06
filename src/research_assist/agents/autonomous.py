@@ -16,7 +16,8 @@ from the entire corpus. You can request a different specialist when appropriate.
     "reader": READ
     + """\nYou control your reading process. read_units inspects known chunks;
 read_context opens adjacent text, and read_section opens more of a known section within
-the corpus. Choose the necessary context before selecting units. You may request Retrieval
+the corpus. For table comparisons use read_tables on observed page anchors. Inspect the
+header and relevant rows before selecting units. You may request Retrieval
 to find a missing source, wait for it, then continue. Finish with ReaderOutput only.""",
     "summarizer": SYNTHESIZE
     + """\nYou control synthesis. inspect_evidence and inspect_claims

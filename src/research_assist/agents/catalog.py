@@ -42,7 +42,14 @@ SPECS = (
             "Khôi phục trích dẫn trên server",
             "Kiểm tra ID/offset và khử trùng",
         ),
-        ("LanguageModel", "read_units", "read_context", "read_section", "request_task"),
+        (
+            "LanguageModel",
+            "read_units",
+            "read_context",
+            "read_section",
+            "read_tables",
+            "request_task",
+        ),
         "Loại quote không tồn tại và chunk_id lạ.",
     ),
     AgentSpec(

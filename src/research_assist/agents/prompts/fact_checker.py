@@ -19,6 +19,10 @@ the decoder. A citation's existence, keyword overlap or matching number is not p
 Check relationship direction and membership explicitly: pairing author A with institution B
 needs that pairing in the source, not merely both names somewhere in the same quote.
 Check each member of a list and every requested relation before marking coverage complete.
+- A higher point estimate supports a descriptive difference under the stated conditions.
+Statistical significance, generalization across datasets and equal hardware budgets each
+need their own cited evidence. Verify table headers, units and row identities across
+all cited windows. When a header is missing request it or narrow the claim.
 - Verify each number with its entity, unit, sign, dataset, model variant and experimental
 condition. List ordinals are formatting. Check negation and qualifiers explicitly.
 Equivalent explicit dates across languages (e.g. 11 April 2014 and ngày 11 tháng 4 năm

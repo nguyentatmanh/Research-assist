@@ -5,6 +5,7 @@ from collections import Counter
 
 from research_assist.agents.policies.dates import date_mentions, without_dates
 from research_assist.domain.models import Claim, ClaimCheck, Evidence
+from research_assist.domain.text import fold
 
 _NUMBER = re.compile(r"(?<!\w)[+−-]?\d+(?:[.,]\d+)*(?:[eE][+-]?\d+)?(?:%|％)?")
 _LIST_MARKER = re.compile(r"(?m)(?<!\S)(\d{1,2})[.)](?=\s+\S)")
@@ -64,6 +65,29 @@ def numeric_guard_reason(claim: str, quotes: list[str]) -> str:
     return ""
 
 
+_SIGNIFICANCE = re.compile(
+    r"\b(?:statistically significant\b|statistical significance\b|y nghia thong ke\b)"
+)
+_NEGATIVE_SIGNIFICANCE = re.compile(
+    r"\b(?:no|not|never|without|failed to|lack(?:ed|s)?|khong|chua)\b[^.;!?\n]{0,45}$"
+)
+
+
+def significance_guard_reason(claim: str, quotes: list[str]) -> str:
+    """An explicit positive significance claim needs statistical evidence in its citations."""
+
+    def positive(text: str) -> bool:
+        folded = fold(text)
+        return any(
+            not _NEGATIVE_SIGNIFICANCE.search(folded[max(0, m.start() - 55) : m.start()])
+            for m in _SIGNIFICANCE.finditer(folded)
+        )
+
+    if positive(claim) and not any(positive(q) for q in quotes):
+        return "Chưa có bằng chứng thống kê trong trích dẫn cho kết luận có ý nghĩa thống kê."
+    return ""
+
+
 def validate_checks(
     claims: list[Claim], evidence: list[Evidence], checks: list[ClaimCheck]
 ) -> list[ClaimCheck]:
@@ -86,7 +110,9 @@ def validate_checks(
             reason = "Kết quả kiểm tra không trỏ tới bằng chứng hợp lệ của nhận định."
         elif check.verdict == "supported":
             quoted = [lookup[key].quote for key in check.evidence_ids]
-            reason = numeric_guard_reason(claim.text, quoted)
+            reason = numeric_guard_reason(claim.text, quoted) or significance_guard_reason(
+                claim.text, quoted
+            )
         if reason or check is None:
             validated.append(
                 ClaimCheck(
