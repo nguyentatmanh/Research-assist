@@ -13,7 +13,11 @@ def source_units(chunks: list[RetrievedChunk]) -> list[dict[str, str | int]]:
         while start < len(chunk.text):
             end = min(start + 850, len(chunk.text))
             if end < len(chunk.text):
-                matches = list(re.finditer(r"(?<=[.!?])\s+|\n\n", chunk.text[start + 250 : end]))
+                in_table = any(
+                    r.kind == "table" and r.start < chunk.start + end < r.end for r in chunk.regions
+                )
+                boundary = r"\n" if in_table else r"(?<=[.!?])\s+|\n\n"
+                matches = list(re.finditer(boundary, chunk.text[start + 250 : end]))
                 if matches:
                     end = start + 250 + matches[-1].start()
             # Keep a short final sentence with its context, without creating an oversized quote.

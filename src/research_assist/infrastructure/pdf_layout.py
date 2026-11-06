@@ -12,6 +12,7 @@ from research_assist.domain.models import SourceRegion
 class Block:
     text: str
     bbox: tuple[float, float, float, float]
+    table: bool = False
 
 
 def clean(text: str) -> str:
@@ -77,10 +78,102 @@ def _line_columns(lines: list[Block]) -> list[Block]:
     ]
 
 
+def _aligned_rows(cells: list[tuple[Any, str]], left: float) -> str:
+    """Keep blank cells and spanning headers in their printed horizontal positions."""
+    rows: list[list[tuple[Any, str]]] = []
+    for box, value in sorted(cells, key=lambda item: (item[0][3], item[0][0])):
+        if not rows or abs(box[3] - rows[-1][0][0][3]) > 3:
+            rows.append([])
+        rows[-1].append((box, value))
+    if sum(len(row) >= 3 for row in rows) < 2:
+        return ""
+    pitch = min((box[2] - box[0]) / len(value) for box, value in cells)
+    if pitch < 1:
+        return ""
+    lines = []
+    for row in rows:
+        line = ""
+        for box, value in sorted(row, key=lambda item: item[0][0]):
+            column = round((box[0] - left) / pitch)
+            line = line.ljust(max(column, len(line) + 1)) + value
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _open_tables(
+    page: Any, drawings: list[Any], raw_blocks: list[Any], grids: list[Block]
+) -> list[Block]:
+    """Limit borderless-column recovery to captioned tables with repeated full-width rules."""
+    rails = [
+        d["rect"]
+        for d in drawings
+        if d["rect"].height < 1 and d["rect"].width >= page.rect.width * 0.28
+    ]
+    if len(rails) < 3:
+        return []
+    cells = []
+    captions = []
+    for block in raw_blocks:
+        lines = block.get("lines", [])
+        for line in lines:
+            pieces = []
+            for span in line["spans"]:
+                value = span["text"]
+                if span["flags"] & 1:
+                    value = value.translate(str.maketrans("0123456789+-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻"))
+                pieces.append(value)
+            value = clean("".join(pieces))
+            if value:
+                cells.append((line["bbox"], value))
+        if lines and re.match(
+            r"^(Table|Bảng)\s+\d+[.:]", "".join(s["text"] for s in lines[0]["spans"]).strip(), re.I
+        ):
+            captions.append(block["bbox"])
+    found: list[Block] = []
+    for cap in captions:
+        tops = [
+            r for r in rails if -2 <= r.y0 - cap[3] <= 20 and min(r.x1, cap[2]) > max(r.x0, cap[0])
+        ]
+        if not tops:
+            continue
+        top = min(tops, key=lambda r: r.y0)
+        matching = sorted(
+            {
+                r.y0
+                for r in rails
+                if r.y0 > top.y0 + 2 and abs(r.x0 - top.x0) < 2 and abs(r.x1 - top.x1) < 2
+            }
+        )
+        bottom = top.y0
+        count = 0
+        for y in matching:
+            if y - bottom > 90 or any(top.y0 < c[1] < y for c in captions):
+                break
+            bottom, count = y, count + 1
+        if count < 2 or any(
+            b.bbox[0] < top.x1 and b.bbox[2] > top.x0 and b.bbox[1] < bottom and b.bbox[3] > top.y0
+            for b in grids + found
+        ):
+            continue
+        items = [
+            (box, value)
+            for box, value in cells
+            if top.y0 < (box[1] + box[3]) / 2 < bottom
+            and top.x0 <= (box[0] + box[2]) / 2 <= top.x1
+        ]
+        if any(box[0] < top.x0 - 1 or box[2] > top.x1 + 1 for box, _ in items):
+            continue
+        body = _aligned_rows(items, top.x0)
+        if body:
+            found.append(Block(body, (top.x0, top.y0, top.x1, bottom), True))
+    return found
+
+
 def page_layout(page: Any, *, textpage: Any = None) -> tuple[str, list[SourceRegion]]:
     tables = []
     # Restrict table detection to ruled tables, avoiding guesses from columnar prose.
-    if textpage is None and page.get_drawings():
+    drawings = page.get_drawings() if textpage is None else []
+    if drawings:
         tables = list(page.find_tables(strategy="lines_strict").tables)
     blocks: list[Block] = []
     footnotes: list[Block] = []
@@ -89,15 +182,21 @@ def page_layout(page: Any, *, textpage: Any = None) -> tuple[str, list[SourceReg
         text = "\n".join(rows).strip()
         if text:
             x0, y0, x1, y1 = table.bbox
-            blocks.append(Block(text, (float(x0), float(y0), float(x1), float(y1))))
-    for raw in page.get_text("dict", textpage=textpage)["blocks"]:
+            blocks.append(Block(text, (float(x0), float(y0), float(x1), float(y1)), True))
+    raw_blocks = page.get_text("dict", textpage=textpage)["blocks"]
+    blocks.extend(_open_tables(page, drawings, raw_blocks, blocks))
+    table_boxes = [b.bbox for b in blocks]
+    for raw in raw_blocks:
         if raw["type"] != 0:
             continue
         lines = []
         for line in raw["lines"]:
             x0, y0, x1, y1 = line["bbox"]
             cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-            if any(t.bbox[0] <= cx <= t.bbox[2] and t.bbox[1] <= cy <= t.bbox[3] for t in tables):
+            if any(
+                left <= cx <= right and top <= cy <= bottom
+                for left, top, right, bottom in table_boxes
+            ):
                 continue
             text = clean("".join(span["text"] for span in line["spans"]))
             if text:
@@ -149,7 +248,12 @@ def page_layout(page: Any, *, textpage: Any = None) -> tuple[str, list[SourceReg
             offset += 2
         parts.append(block.text)
         regions.append(
-            SourceRegion(start=offset, end=offset + len(block.text), bbox=list(block.bbox))
+            SourceRegion(
+                start=offset,
+                end=offset + len(block.text),
+                bbox=list(block.bbox),
+                kind="table" if block.table else "text",
+            )
         )
         offset += len(block.text)
     return "\n\n".join(parts), regions

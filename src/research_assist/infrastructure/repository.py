@@ -113,6 +113,13 @@ class Repository:
             row = db.execute("SELECT metadata FROM documents WHERE sha256=?", (digest,)).fetchone()
         return Document.model_validate_json(row["metadata"]) if row else None
 
+    def update_document_metadata(self, document: Document) -> None:
+        with self.connection() as db:
+            db.execute(
+                "UPDATE documents SET metadata=? WHERE id=?",
+                (document.model_dump_json(), document.id),
+            )
+
     def add_document(self, document: Document, chunks: list[IndexedChunk], blob_name: str) -> None:
         with self.connection() as db:
             db.execute(

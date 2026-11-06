@@ -27,7 +27,12 @@ def token_chunks(
     sections: list[SourceSection], document: Document, settings: Settings
 ) -> list[Chunk]:
     try:
-        tokenizer = tokenizer_for(settings.embedding_model, settings.embedding_revision)
+        tokenizer = tokenizer_for(
+            settings.chunk_tokenizer_model or settings.embedding_model,
+            settings.chunk_tokenizer_revision
+            if settings.chunk_tokenizer_model
+            else settings.embedding_revision,
+        )
         chunks: list[Chunk] = []
         stride = settings.chunk_tokens - settings.chunk_token_overlap
         for section in sections:

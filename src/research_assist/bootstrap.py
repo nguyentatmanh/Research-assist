@@ -15,7 +15,12 @@ from research_assist.application.runs import RunManager
 from research_assist.config import Settings
 from research_assist.domain.ports import Embedder, Reranker
 from research_assist.infrastructure.cohere_reranker import CohereReranker
-from research_assist.infrastructure.embeddings import APIEmbeddings, LocalEmbeddings, NoEmbeddings
+from research_assist.infrastructure.embeddings import (
+    APIEmbeddings,
+    LocalEmbeddings,
+    NoEmbeddings,
+    RemoteEmbeddings,
+)
 from research_assist.infrastructure.repository import Repository
 from research_assist.infrastructure.routing import ModelRouter
 from research_assist.infrastructure.search import HybridSearch, LocalReranker, NoReranker
@@ -36,6 +41,33 @@ class Container:
         await self.runs.close()
         await self.client.aclose()
 
+    def configure_embeddings(self, settings: Settings) -> None:
+        """Caller must ensure no run or document operation is active; no await during swap."""
+        embedder = build_embedder(settings, self.client)
+        search = HybridSearch(self.repository, embedder, settings)
+        self.settings, self.embedder, self.search = settings, embedder, search
+        self.documents.settings, self.documents.embedder = settings, embedder
+        self.runs.settings = settings
+        self.runs.pipeline.retrieval.search = search
+        self.runs.pipeline.embedding_model = embedder.fingerprint
+
+
+def build_embedder(settings: Settings, client: httpx.AsyncClient) -> Embedder:
+    if settings.embedding_provider == "sentence-transformers":
+        return LocalEmbeddings(
+            settings.embedding_model,
+            settings.embedding_batch_size,
+            family=settings.embedding_family,
+            device=settings.local_device,
+            revision=settings.embedding_revision,
+            max_seq_length=settings.embedding_max_seq_length,
+        )
+    if settings.embedding_provider == "openai":
+        return APIEmbeddings(settings, client)
+    if settings.embedding_provider == "remote":
+        return RemoteEmbeddings(settings, client)
+    return NoEmbeddings()
+
 
 def build_container(
     settings: Settings, transport: httpx.AsyncBaseTransport | None = None
@@ -49,18 +81,7 @@ def build_container(
         transport=transport,
     )
     llm = ModelRouter(settings, client, repository)
-    embedder: Embedder = NoEmbeddings()
-    if settings.embedding_provider == "sentence-transformers":
-        embedder = LocalEmbeddings(
-            settings.embedding_model,
-            settings.embedding_batch_size,
-            family=settings.embedding_family,
-            device=settings.local_device,
-            revision=settings.embedding_revision,
-            max_seq_length=settings.embedding_max_seq_length,
-        )
-    elif settings.embedding_provider == "openai":
-        embedder = APIEmbeddings(settings, client)
+    embedder = build_embedder(settings, client)
     reranker: Reranker
     if settings.resolved_reranker_provider == "cohere":
         reranker = CohereReranker(settings, client, repository)

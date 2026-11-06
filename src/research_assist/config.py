@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_thinking: bool = False
     structured_output: Literal["schema", "json"] = "schema"
-    embedding_provider: Literal["none", "sentence-transformers", "openai"] = "none"
+    embedding_provider: Literal["none", "sentence-transformers", "openai", "remote"] = "none"
     embedding_model: str = "intfloat/multilingual-e5-small"
     embedding_base_url: str = "https://api.openai.com/v1"
     embedding_api_key: SecretStr = SecretStr("")
@@ -125,6 +125,8 @@ class Settings(BaseSettings):
     chunk_strategy: Literal["chars", "tokens"] = "chars"
     chunk_tokens: int = Field(default=384, ge=64, le=4096)
     chunk_token_overlap: int = Field(default=48, ge=0, le=512)
+    chunk_tokenizer_model: str = ""
+    chunk_tokenizer_revision: str = ""
     # Optional password for shared lab deployments; no password needed on localhost.
     access_token: SecretStr = SecretStr("")
     allowed_hosts: list[str] = ["localhost", "127.0.0.1", "testserver"]
@@ -178,11 +180,34 @@ class Settings(BaseSettings):
             raise ValueError("RA_OPENAI_API_KEY is required (or a gateway token)")
         if "deepseek" in providers and not self.deepseek_api_key.get_secret_value():
             raise ValueError("RA_DEEPSEEK_API_KEY is required for DeepSeek")
-        if self.embedding_provider == "openai":
+        if self.embedding_provider in {"openai", "remote"}:
             if not self.embedding_api_key.get_secret_value():
                 raise ValueError("RA_EMBEDDING_API_KEY is required")
             if self.embedding_model == "intfloat/multilingual-e5-small":
                 raise ValueError("Set RA_EMBEDDING_MODEL to your API's embedding model")
+        if self.embedding_provider == "remote":
+            from urllib.parse import urlsplit
+
+            remote = urlsplit(self.embedding_base_url)
+            if (
+                remote.scheme not in {"http", "https"}
+                or not remote.hostname
+                or remote.username
+                or remote.password
+                or remote.query
+                or remote.fragment
+            ):
+                raise ValueError("Set a valid embedding endpoint URL without credentials/query.")
+            if remote.scheme == "http" and remote.hostname not in {"127.0.0.1", "localhost", "::1"}:
+                raise ValueError("Remote embedding endpoints require HTTPS.")
+            if not self.embedding_model.startswith(("research-e5-", "research-qwen3-")):
+                raise ValueError(
+                    "Copy the research-e5- or research-qwen3- model ID printed by the GPU notebook."
+                )
+            if self.chunk_strategy == "tokens" and not self.chunk_tokenizer_model:
+                raise ValueError(
+                    "Set RA_CHUNK_TOKENIZER_MODEL to the matching tokenizer path/model ID."
+                )
         return self
 
     @property

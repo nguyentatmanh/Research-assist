@@ -177,3 +177,72 @@ class APIEmbeddings:
                     "Embedding API không khả dụng hoặc phản hồi sai định dạng."
                 ) from exc
         return validate_vectors(all_vectors, len(texts)) if texts else []
+
+
+class RemoteEmbeddings:
+    """Notebook embedding protocol: checkpoint identity and query/document intent are explicit."""
+
+    def __init__(self, settings: Settings, client: httpx.AsyncClient) -> None:
+        self.settings, self.client = settings, client
+        self.base_url = settings.embedding_base_url.rstrip("/")
+        if not self.base_url.endswith("/v1"):
+            self.base_url += "/v1"
+        # A new Quick Tunnel URL for the SAME checkpoint must not invalidate vectors.
+        self.fingerprint: str | None = f"remote:{settings.embedding_model}:normalized:v1"
+        self._verified = False
+        self._lock = asyncio.Lock()
+
+    async def embed(self, texts: list[str], *, query: bool = False) -> list[list[float]]:
+        if not texts:
+            return []
+        headers = {"Authorization": "Bearer " + self.settings.embedding_api_key.get_secret_value()}
+        try:
+            async with self._lock:
+                if not self._verified:
+                    response = await self.client.get(self.base_url + "/info", headers=headers)
+                    response.raise_for_status()
+                    info = response.json()
+                    if (
+                        info.get("model") != self.settings.embedding_model
+                        or info.get("protocol") != "research-embedding-v1"
+                        or info.get("family")
+                        != (
+                            "e5"
+                            if self.settings.embedding_model.startswith("research-e5-")
+                            else "qwen3"
+                        )
+                        or info.get("normalized") is not True
+                        or info.get("max_seq_length") != self.settings.embedding_max_seq_length
+                    ):
+                        raise ProviderError(
+                            "GPU checkpoint/config đã đổi. Cập nhật model ID và reindex."
+                        )
+                    self._verified = True
+            vectors = []
+            size = min(32, self.settings.embedding_batch_size)
+            for start in range(0, len(texts), size):
+                batch = texts[start : start + size]
+                response = await self.client.post(
+                    self.base_url + "/embeddings",
+                    headers=headers,
+                    json={
+                        "model": self.settings.embedding_model,
+                        "input": batch,
+                        "input_type": "query" if query else "passage",
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if payload.get("model") != self.settings.embedding_model:
+                    raise ProviderError("GPU endpoint trả checkpoint khác với model đã cấu hình.")
+                rows = sorted(payload["data"], key=lambda row: row["index"])
+                if [row["index"] for row in rows] != list(range(len(batch))):
+                    raise ProviderError("GPU endpoint trả sai chỉ số vector.")
+                vectors.extend(validate_vectors([r["embedding"] for r in rows], len(batch)))
+            return validate_vectors(vectors, len(texts))
+        except ProviderError:
+            raise
+        except Exception:
+            raise ProviderError(
+                "Không kết nối được GPU endpoint. Kiểm tra notebook, tunnel URL, key và model ID."
+            ) from None

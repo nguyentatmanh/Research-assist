@@ -22,12 +22,14 @@ class Document(Contract):
     created_at: str
     warnings: list[str] = Field(default_factory=list)
     index_version: str = "legacy"
+    arxiv_id: str | None = None
 
 
 class SourceRegion(Contract):
     start: int = Field(ge=0)
     end: int = Field(ge=0)
     bbox: list[float] = Field(min_length=4, max_length=4)
+    kind: Literal["text", "table"] = "text"
 
 
 class SourceSection(Contract):
