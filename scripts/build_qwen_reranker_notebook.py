@@ -209,8 +209,10 @@ def build():
     training = without_repo_imports(
         (ROOT / "notebooks/kaggle_qwen_reranker_training.py").read_text("utf-8")
     )
-    imports = ("import hashlib, json, os, shutil, subprocess, time, math, re, random\n"
-               "from collections import Counter, defaultdict\nfrom pathlib import Path\n")
+    imports = (
+        "import hashlib, json, os, shutil, subprocess, time, math, re, random\n"
+        "from collections import Counter, defaultdict\nfrom pathlib import Path\n"
+    )
     library = imports + data + "\n" + helper + "\n" + common + "\n" + scorer + "\n" + training
     main = """
 if __name__ == "__main__":

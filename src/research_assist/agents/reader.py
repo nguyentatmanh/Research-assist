@@ -58,11 +58,14 @@ def _missing_literal_anchor(question: str, chunks: list[RetrievedChunk]) -> bool
     )
     if not anchors:
         return False
+
     def canonical(value: str) -> str:
         return re.sub(r"[-‐‑–]\s*", "-", fold(value))
+
     context = canonical("\n".join(c.text for c in chunks))
-    return any(not re.search(r"(?<!\w)" + re.escape(canonical(a)) + r"(?!\w)", context)
-               for a in anchors)
+    return any(
+        not re.search(r"(?<!\w)" + re.escape(canonical(a)) + r"(?!\w)", context) for a in anchors
+    )
 
 
 class ReaderAgent:
@@ -232,7 +235,10 @@ class ReaderAgent:
 
     def _extract(self, question: str, chunks: list[RetrievedChunk]) -> ReaderOutput:
         if _missing_literal_anchor(question, chunks):
-            return ReaderOutput(evidence=[], gaps=["Thiếu bằng chứng cho định danh hoặc đơn vị được hỏi."])
+            return ReaderOutput(
+                evidence=[],
+                gaps=["Thiếu bằng chứng cho định danh hoặc đơn vị được hỏi."],
+            )
         query_terms = set(tokens(question))
         results = []
         for chunk in chunks:

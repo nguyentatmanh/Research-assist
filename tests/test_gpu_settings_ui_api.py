@@ -24,18 +24,26 @@ def test_qwen_endpoint_can_be_saved_and_restored(settings, monkeypatch):
         if request.headers.get("authorization") != "Bearer " + KEY:
             return httpx.Response(401)
         if request.url.path == "/v1/info":
-            return httpx.Response(200, json={
-                "protocol": "research-embedding-v1", "family": "qwen3",
-                "model": QWEN_MODEL, "dimension": 2560,
-                "max_seq_length": 512, "normalized": True,
-                "tokenizer_model": "Qwen/Qwen3-Embedding-4B",
-            })
-        return httpx.Response(200, json={"model": QWEN_MODEL, "data": [
-            {"index": 0, "embedding": [1.0] + [0.0] * 2559}
-        ]})
+            return httpx.Response(
+                200,
+                json={
+                    "protocol": "research-embedding-v1",
+                    "family": "qwen3",
+                    "model": QWEN_MODEL,
+                    "dimension": 2560,
+                    "max_seq_length": 512,
+                    "normalized": True,
+                    "tokenizer_model": "Qwen/Qwen3-Embedding-4B",
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"model": QWEN_MODEL, "data": [{"index": 0, "embedding": [1.0] + [0.0] * 2559}]},
+        )
 
     monkeypatch.setattr(
-        module, "build_container",
+        module,
+        "build_container",
         lambda config: original(config, transport=httpx.MockTransport(provider)),
     )
     with TestClient(create_app(settings)) as client:
@@ -44,9 +52,10 @@ def test_qwen_endpoint_can_be_saved_and_restored(settings, monkeypatch):
         assert saved.status_code == 200, saved.text
         assert saved.json()["model_family"] == "qwen3"
         assert saved.json()["model_id"] == QWEN_MODEL
-        wrong = client.post("/api/embedding/remote/test", json={
-            **selected, "tokenizer_model": "Qwen/Qwen3-Embedding-0.6B"
-        })
+        wrong = client.post(
+            "/api/embedding/remote/test",
+            json={**selected, "tokenizer_model": "Qwen/Qwen3-Embedding-0.6B"},
+        )
         assert wrong.status_code == 400
         assert client.delete("/api/embedding/remote").status_code == 200
 

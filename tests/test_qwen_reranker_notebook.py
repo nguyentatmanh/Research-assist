@@ -185,7 +185,9 @@ def test_evaluation_candidates_do_not_inject_gold(data, monkeypatch):
 
     monkeypatch.setattr(module, "NotebookBM25", MissesGold)
     _, _, panel, _ = prepare_reranker_data(data, Tokenizer(), "task", 2000)
-    assert all(not set(item["relevant_ids"]) & {c["id"] for c in item["candidates"]} for item in panel)
+    assert all(
+        not set(item["relevant_ids"]) & {c["id"] for c in item["candidates"]} for item in panel
+    )
     assert ranking_metrics(panel)["candidate_recall@20"] == 0
 
 
@@ -201,7 +203,7 @@ def test_ranking_missing_gold_stays_zero_and_cannot_be_injected():
 
 
 def test_scorer_uses_yes_minus_no_not_embedding_pooling():
-    import torch
+    torch = pytest.importorskip("torch")
 
     class Batch(dict):
         def to(self, device):

@@ -158,8 +158,7 @@ def _open_tables(
         items = [
             (box, value)
             for box, value in cells
-            if top.y0 < (box[1] + box[3]) / 2 < bottom
-            and top.x0 <= (box[0] + box[2]) / 2 <= top.x1
+            if top.y0 < (box[1] + box[3]) / 2 < bottom and top.x0 <= (box[0] + box[2]) / 2 <= top.x1
         ]
         if any(box[0] < top.x0 - 1 or box[2] > top.x1 + 1 for box, _ in items):
             continue

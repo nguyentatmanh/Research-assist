@@ -67,7 +67,7 @@ def test_swift_embedding_recipe_has_negatives_and_t4_precision():
 
 
 def test_callback_saves_at_boundary_and_verifies_actual_parameter_change(tmp_path):
-    import torch
+    torch = pytest.importorskip("torch")
 
     model = torch.nn.Linear(2, 2)
     clock = [0]
@@ -248,7 +248,7 @@ def test_triplets_respect_paper_gold_and_nontruncated_spans(tmp_path):
 
 
 def test_adapter_query_eos_pooling_and_normalization_on_cpu():
-    import torch
+    torch = pytest.importorskip("torch")
 
     from notebooks.qwen_adapter_encoder import QwenAdapterEncoder
 

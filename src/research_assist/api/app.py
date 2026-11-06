@@ -383,7 +383,10 @@ def _create_app(settings: Settings) -> FastAPI:
         data = await library.pdf(paper.paper_id, container.settings.max_upload_mb * 1024 * 1024)
         filename = "arxiv-" + paper.paper_id.replace("/", "-") + ".pdf"
         document, duplicate = await container.documents.ingest(
-            data, filename, arxiv_id=paper.paper_id, paper_title=paper.title,
+            data,
+            filename,
+            arxiv_id=paper.paper_id,
+            paper_title=paper.title,
         )
         return {"document": document.model_dump(), "duplicate": duplicate}
 
