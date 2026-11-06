@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#0f5132" />
+    <meta name="theme-color" content="#1E3A5F" />
     <title>Research Desk · AI Research Assist</title>
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
     <link
@@ -22,6 +22,7 @@
     />
     <link rel="stylesheet" href="/assets/fonts.css" />
     <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/paper_search.css" />
     <script type="module" src="/assets/app.js"></script>
   </head>
   <body>
@@ -755,6 +756,18 @@
                 <svg><use href="#i-stack" /></svg>Reindex embedding
               </button>
             </div>
+            <details class="paper-discovery">
+              <summary>Tìm bài liên quan trên arXiv</summary>
+              <form id="paper-search-form">
+                <label for="paper-query">Từ khóa hoặc tiêu đề bài báo</label>
+                <div class="paper-query-row">
+                  <input type="search" id="paper-query" minlength="3" maxlength="300" required />
+                  <button class="secondary-button" type="submit">Tìm trên arXiv</button>
+                </div>
+              </form>
+              <p id="paper-status" role="status" aria-live="polite"></p>
+              <ul id="paper-results"></ul>
+            </details>
             <div class="document-table-wrap">
               <table class="document-table">
                 <thead>
@@ -914,6 +927,144 @@
         </button>
       </div>
       <div id="settings-summary" class="settings-summary"></div>
+      <section class="gpu-settings" aria-labelledby="gpu-settings-title">
+        <div class="gpu-heading">
+          <span class="guide-icon"
+            ><svg><use href="#i-stack" /></svg
+          ></span>
+          <div>
+            <h3 id="gpu-settings-title">Kết nối GPU từ Kaggle</h3>
+            <p>Dùng model embedding đã fine-tune qua Cloudflare Tunnel.</p>
+          </div>
+          <span id="gpu-active-badge" class="gpu-badge">Chưa bật</span>
+        </div>
+        <form id="gpu-config-form" autocomplete="off">
+          <fieldset id="gpu-fields" disabled>
+            <div class="gpu-form-grid">
+              <label class="gpu-field gpu-wide" for="gpu-family">
+                Họ model embedding
+                <select id="gpu-family">
+                  <option value="e5">Multilingual E5</option>
+                  <option value="qwen3-0.6b">Qwen3 Embedding 0.6B</option>
+                  <option value="qwen3-4b">Qwen3 Embedding 4B</option>
+                </select>
+                <small
+                  >Chọn đúng họ model đang chạy trên GPU. Checkpoint khác cần
+                  cập nhật lại chỉ mục.</small
+                >
+              </label>
+              <label class="gpu-field gpu-wide" for="gpu-url">
+                URL Cloudflare / GPU endpoint
+                <input
+                  id="gpu-url"
+                  type="url"
+                  required
+                  maxlength="2048"
+                  placeholder="https://your-tunnel.trycloudflare.com"
+                  spellcheck="false"
+                />
+                <small
+                  >Dán URL notebook đã in ra. Có hoặc không có /v1 đều
+                  được.</small
+                >
+              </label>
+              <label class="gpu-field" for="gpu-key">
+                Key truy cập GPU
+                <input
+                  id="gpu-key"
+                  type="password"
+                  maxlength="4096"
+                  autocomplete="new-password"
+                  placeholder="Key riêng bạn đã đặt trong notebook"
+                  spellcheck="false"
+                />
+                <small id="gpu-key-note"
+                  >Key riêng của notebook, tối thiểu 32 ký tự.</small
+                >
+              </label>
+              <label class="gpu-field" for="gpu-model">
+                <span>Model ID <span class="gpu-optional">tùy chọn</span></span>
+                <input
+                  id="gpu-model"
+                  type="text"
+                  maxlength="160"
+                  placeholder="research-e5-… hoặc research-qwen3-…"
+                  spellcheck="false"
+                />
+                <small
+                  >Để trống để tự nhận diện; hoặc dán ID từ notebook để đối
+                  chiếu.</small
+                >
+              </label>
+            </div>
+            <details class="gpu-advanced">
+              <summary>Tùy chọn embedding</summary>
+              <div class="gpu-form-grid">
+                <label class="gpu-field" for="gpu-tokenizer">
+                  Tokenizer trên máy này
+                  <input
+                    id="gpu-tokenizer"
+                    type="text"
+                    required
+                    maxlength="300"
+                    value="intfloat/multilingual-e5-base"
+                    spellcheck="false"
+                  />
+                  <small
+                    >Model ID hoặc thư mục tokenizer đúng với checkpoint đang
+                    chạy.</small
+                  >
+                </label>
+                <label class="gpu-field" for="gpu-batch">
+                  Số đoạn mỗi request
+                  <input
+                    id="gpu-batch"
+                    type="number"
+                    min="1"
+                    max="32"
+                    value="16"
+                    required
+                  />
+                </label>
+              </div>
+            </details>
+            <div class="gpu-actions">
+              <button id="gpu-test" class="secondary-button" type="button">
+                <svg><use href="#i-check" /></svg>Kiểm tra kết nối
+              </button>
+              <button id="gpu-save" class="primary-button" type="submit">
+                Lưu và áp dụng
+              </button>
+              <button
+                id="gpu-restore"
+                class="text-button"
+                type="button"
+                disabled
+              >
+                Khôi phục cấu hình gốc
+              </button>
+            </div>
+          </fieldset>
+        </form>
+        <p
+          id="gpu-feedback"
+          class="gpu-feedback"
+          role="status"
+          aria-live="polite"
+        >
+          Đang đọc cấu hình GPU…
+        </p>
+        <div id="gpu-index-panel" class="gpu-index-panel" hidden>
+          <p id="gpu-index-note"></p>
+          <button id="gpu-rebuild" class="secondary-button" type="button">
+            <svg><use href="#i-stack" /></svg>Cập nhật chỉ mục tài liệu
+          </button>
+        </div>
+        <p class="gpu-privacy">
+          Key chỉ được lưu ở backend, không được gửi lại trình duyệt. Cấu hình
+          áp dụng ngay. Giữ notebook và tunnel đang chạy khi sử dụng GPU.
+        </p>
+      </section>
       <div class="routing-heading">
         <span class="guide-icon"
           ><svg><use href="#i-spark" /></svg

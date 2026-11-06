@@ -1,8 +1,10 @@
 import { api, uploadDocument } from "./api.js";
+import { initializePaperSearch } from "./paper_search.js";
 import { $, $$, el, icon, dateLabel, statuses, toast } from "./dom.js";
 import { renderEvents, renderResult, selectTab, copyReport } from "./report.js";
 import { renderBenchmark, renderRoutes } from "./lab.js";
 import { recordStatusLabel } from "./run_status.js";
+import { initializeGpuSettings, loadGpuSettings } from "./gpu_settings.js";
 
 const state = {
   documents: [],
@@ -108,6 +110,7 @@ function renderDocuments() {
     );
   for (const document of state.documents) {
     const row = el("label", "sidebar-document");
+    row.title = document.filename;
     const input = el("input");
     input.type = "checkbox";
     input.checked = state.selected.has(document.id);
@@ -164,6 +167,13 @@ function renderLibrary() {
       el("strong", "", document.title),
       el("small", "", document.filename),
     );
+    if (document.arxiv_id) {
+      const source = el("a", "", "arXiv " + document.arxiv_id);
+      source.href = "https://arxiv.org/abs/" + document.arxiv_id;
+      source.target = "_blank";
+      source.rel = "noopener noreferrer";
+      first.append(source);
+    }
     const kind = el("td");
     kind.append(el("span", "doc-type", document.kind.toUpperCase()));
     row.append(
@@ -253,6 +263,8 @@ async function refreshDocuments() {
   state.documents = (await api("/documents")).documents;
   renderDocuments();
 }
+
+initializePaperSearch(refreshDocuments);
 
 function setWorking(value) {
   state.working = value;
@@ -949,6 +961,7 @@ $("#advanced-toggle").addEventListener("click", () => {
 ["settings-button", "notice-settings"].forEach((id) =>
   $(`#${id}`).addEventListener("click", async () => {
     $("#settings-dialog").showModal();
+    loadGpuSettings();
     try {
       const info = await api("/diagnostics");
       $("#diagnostics").textContent =
@@ -958,6 +971,18 @@ $("#advanced-toggle").addEventListener("click", () => {
     }
   }),
 );
+initializeGpuSettings(
+  async () => {
+    state.config = await api("/config");
+    renderConfig();
+    await refreshDocuments();
+    const info = await api("/diagnostics");
+    $("#diagnostics").textContent =
+      `${info.documents} tài liệu · ${info.chunks} đoạn · ${info.indexed_chunks} đoạn có vector. ${info.reindex_needed ? "Cần cập nhật chỉ mục." : "Chỉ mục sẵn sàng."}`;
+  },
+  () => state.working || state.uploading,
+);
+
 $("#clear-cache").addEventListener("click", async (event) => {
   event.currentTarget.disabled = true;
   try {

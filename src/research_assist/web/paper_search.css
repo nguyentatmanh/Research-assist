@@ -1,0 +1,44 @@
+.paper-discovery {
+  margin-block: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border, #bcc4cd);
+  border-radius: 0.4rem;
+}
+.paper-discovery summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.paper-discovery form {
+  margin-block-start: 1rem;
+}
+.paper-query-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block-start: 0.3rem;
+}
+.paper-query-row input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  padding: 0.5rem;
+}
+.paper-discovery ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.paper-discovery li {
+  padding-block: 0.65rem;
+  border-top: 1px solid var(--border, #bcc4cd);
+}
+.paper-discovery li a,
+.paper-discovery li small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.paper-discovery li small {
+  margin-block: 0.25rem 0.4rem;
+}
+.paper-discovery p:empty {
+  margin: 0;
+}
