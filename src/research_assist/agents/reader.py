@@ -49,10 +49,11 @@ def quote_span(text: str, quote: str) -> tuple[int, int] | None:
 
 def _missing_literal_anchor(question: str, chunks: list[RetrievedChunk]) -> bool:
     """Extractive fallback needs literal support for explicit identifiers and units."""
-    # Model/product identifiers with digits, mixed-case units (e.g. mAh),
-    # p-values and percentages are poor candidates for a one-keyword fallback.
+    # Only digit-bearing identifiers, mixed-case units and percentages need a
+    # literal match. Ordinary hyphenated prose can use spaces in the source.
     anchors = re.findall(
-        r"(?<!\w)(?:[A-Za-z]+(?:[-‐‑–][A-Za-z\d]+)+|[a-z]+[A-Z][A-Za-z]*|"
+        r"(?<!\w)(?:[A-Za-z]+(?:[-‐‑–][A-Za-z\d]+)*[-‐‑–]\d+[A-Za-z\d-]*|"
+        r"[a-z]+[A-Z][A-Za-z]*|"
         r"[A-Za-z]{2,}\d+[A-Za-z\d.-]*|\d+(?:[.,]\d+)?%)(?!\w)",
         question,
     )
