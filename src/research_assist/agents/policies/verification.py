@@ -71,6 +71,10 @@ _SIGNIFICANCE = re.compile(
 _NEGATIVE_SIGNIFICANCE = re.compile(
     r"\b(?:no|not|never|without|failed to|lack(?:ed|s)?|khong|chua)\b[^.;!?\n]{0,45}$"
 )
+_NEGATIVE_SIGNIFICANCE_AFTER = re.compile(
+    r"^\s*(?:(?:was|is|were|has|have|had|could|can|did|do|does|been|be|duoc|da)\s+){0,3}"
+    r"(?:not|never|khong|chua)\b"
+)
 
 
 def significance_guard_reason(claim: str, quotes: list[str]) -> str:
@@ -80,6 +84,7 @@ def significance_guard_reason(claim: str, quotes: list[str]) -> str:
         folded = fold(text)
         return any(
             not _NEGATIVE_SIGNIFICANCE.search(folded[max(0, m.start() - 55) : m.start()])
+            and not _NEGATIVE_SIGNIFICANCE_AFTER.search(folded[m.end() : m.end() + 55])
             for m in _SIGNIFICANCE.finditer(folded)
         )
 

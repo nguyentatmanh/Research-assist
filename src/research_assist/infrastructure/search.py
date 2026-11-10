@@ -2,7 +2,6 @@
 
 import asyncio
 import math
-import re
 import time
 from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass
@@ -390,25 +389,6 @@ class HybridSearch:
             )
             if len(selected) >= top_k:
                 break
-        if (
-            selected
-            and top_k >= 2
-            and any(re.search(r"\b(?:tables?|bảng)\b", q, re.I) for q in queries)
-        ):
-            # An explicit table query may first hit prose mentioning the table. Give
-            # a table on that physical page a place in the reranker candidate pool.
-            anchor = selected[0]
-            same_page = (anchor.document_id, anchor.page)
-            for table_chunk in chunks:
-                if (table_chunk.document_id, table_chunk.page) == same_page and any(
-                    r.kind == "table" for r in table_chunk.regions
-                ):
-                    if not any(c.id == table_chunk.id for c in selected[:2]):
-                        selected = [c for c in selected if c.id != table_chunk.id]
-                        selected.insert(
-                            1, chunk_view(table_chunk, score=fused.get(table_chunk.id, 0))
-                        )
-                    break
         return selected[:top_k], warnings
 
 

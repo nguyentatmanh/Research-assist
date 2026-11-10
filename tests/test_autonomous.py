@@ -32,6 +32,7 @@ class AutonomousProvider:
         block_retrieval=False,
         padded_arguments=False,
         search_to_limit=False,
+        reader_tool="read_section",
     ):
         self.calls, self.steps = [], Counter()
         self.writer_driven = writer_driven
@@ -41,6 +42,7 @@ class AutonomousProvider:
         self.block_retrieval = block_retrieval
         self.padded_arguments = padded_arguments
         self.search_to_limit = search_to_limit
+        self.reader_tool = reader_tool
         self.revision_scheduled = False
         self.summary_jobs = set()
         self.original_claim = None
@@ -76,7 +78,7 @@ class AutonomousProvider:
                 if count == 1:
                     output = decision(
                         "use_tool",
-                        tool="read_section",
+                        tool=self.reader_tool,
                         arguments={"chunk_ids": [units[0]["chunk_id"]]},
                     )
                 else:
@@ -240,7 +242,14 @@ class AutonomousProvider:
 
 
 async def run_autonomous(
-    settings, provider, *, max_calls=12, budget=60000, content=None, max_dispatches=16
+    settings,
+    provider,
+    *,
+    max_calls=12,
+    budget=60000,
+    content=None,
+    max_dispatches=16,
+    filename="paper.txt",
 ):
     settings.llm_provider = "openai"
     settings.openai_api_key = SecretStr("offline-only-key")
@@ -256,7 +265,7 @@ async def run_autonomous(
                 b"RAG uses retrieved source evidence to support generated answers. "
                 b"The source describes limitations and conditions for applying this method."
             ),
-            "paper.txt",
+            filename,
         )
         excluded, _ = await container.documents.ingest(
             b"RAG evidence EXCLUDED_SOURCE_ONLY should not enter the selected scope.",
