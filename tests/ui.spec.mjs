@@ -23,7 +23,7 @@ try {
   });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(base);
+  await page.goto(base + "/desk");
   await page.waitForFunction(() =>
     document
       .querySelector("#connection-label")
@@ -68,6 +68,8 @@ try {
     (await page.locator("#report-content").textContent()).includes("RAG"),
   );
   assert.equal(await page.locator(".agent-node.completed").count(), 5);
+  assert.equal(await page.locator("#coverage-panel").isVisible(), false);
+  await page.click('[data-tab="checks"]');
   assert.equal(await page.locator("#coverage-panel").isVisible(), true);
   assert.equal(await page.locator(".coverage-item").count(), 2);
   assert.ok(
@@ -75,6 +77,7 @@ try {
       "Chưa xác định",
     ),
   );
+  await page.click('[data-tab="report"]');
   checks++;
   assert.ok((await page.locator(".citation-button").count()) > 0);
   assert.ok(
@@ -149,7 +152,7 @@ try {
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 1,
   });
-  await mobile.goto(base);
+  await mobile.goto(base + "/desk");
   await mobile.waitForFunction(() =>
     document
       .querySelector("#connection-label")

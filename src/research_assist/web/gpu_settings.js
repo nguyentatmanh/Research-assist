@@ -88,12 +88,13 @@ export async function loadGpuSettings() {
   }
 }
 
-export function initializeGpuSettings(onApplied, isWorking) {
+export function clearGpuKey() {
+  $("#gpu-key").value = "";
+}
+
+export function initializeGpuSettings(onApplied, isWorking, notify = toast) {
   applied = onApplied;
   working = isWorking;
-  $("#settings-dialog").addEventListener("close", () => {
-    $("#gpu-key").value = "";
-  });
   $("#gpu-family").addEventListener("change", () => {
     $("#gpu-tokenizer").value = tokenizerFor($("#gpu-family").value);
     $("#gpu-model").value = "";
@@ -131,7 +132,7 @@ export function initializeGpuSettings(onApplied, isWorking) {
       if (save) {
         showSaved(result);
         await applied();
-        toast("Đã lưu và áp dụng GPU endpoint.");
+        notify("Đã lưu và áp dụng GPU endpoint.");
       } else {
         $("#gpu-model").value = connection.model_id;
         if (connection.tokenizer_model) {

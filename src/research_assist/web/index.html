@@ -1,1233 +1,1261 @@
 <!doctype html>
 <html lang="vi">
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#1E3A5F" />
-    <title>Research Desk · AI Research Assist</title>
-    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Research Assist — Trợ lý nghiên cứu đa tác tử</title>
     <link
-      rel="preload"
-      href="/assets/noto-sans-variable.woff"
-      as="font"
-      type="font/woff"
-      crossorigin
+      rel="icon"
+      type="image/svg+xml"
+      href="/assets/workspace-logo.svg?v=20261106_flat_sticker_v3"
     />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      rel="preload"
-      href="/assets/newsreader-variable.woff"
-      as="font"
-      type="font/woff"
-      crossorigin
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
     />
-    <link rel="stylesheet" href="/assets/fonts.css" />
-    <link rel="stylesheet" href="/assets/styles.css" />
-    <link rel="stylesheet" href="/assets/paper_search.css" />
-    <script type="module" src="/assets/app.js"></script>
+    <link rel="stylesheet" href="/assets/workspace-base.css?v=20261110_fix3" />
+    <link rel="stylesheet" href="/assets/workspace.css?v=continuous-pdf-1" />
+    <link rel="stylesheet" href="/assets/commands.css?v=slash-menu-1" />
+    <link rel="stylesheet" href="/assets/target_editor.css" />
   </head>
   <body>
-    <a class="skip-link" href="#main-content">Đến nội dung chính</a>
-    <svg
-      class="icon-definitions"
-      aria-hidden="true"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <symbol id="i-book" viewBox="0 0 24 24">
-        <path
-          d="M12 6c-3-2-7-2-10-1v15c3-1 7-1 10 1 3-2 7-2 10-1V5c-3-1-7-1-10 1Zm0 0v15"
-        />
-      </symbol>
-      <symbol id="i-search" viewBox="0 0 24 24">
-        <circle cx="10.5" cy="10.5" r="6.5" />
-        <path d="m16 16 5 5" />
-      </symbol>
-      <symbol id="i-stack" viewBox="0 0 24 24">
-        <path d="m12 3 10 5-10 5L2 8l10-5Zm-9 10 9 5 9-5M3 18l9 5 9-5" />
-      </symbol>
-      <symbol id="i-clock" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 7v5l3 2" />
-      </symbol>
-      <symbol id="i-upload" viewBox="0 0 24 24">
-        <path d="M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6" />
-      </symbol>
-      <symbol id="i-file" viewBox="0 0 24 24">
-        <path d="M14 2H5v20h14V7l-5-5Zm0 0v6h5M8 13h8M8 17h6" />
-      </symbol>
-      <symbol id="i-check" viewBox="0 0 24 24">
-        <path d="m5 12 4 4L19 6" />
-      </symbol>
-      <symbol id="i-shield" viewBox="0 0 24 24">
-        <path d="M12 2 3 6v7c0 4 4 7 9 9 5-2 9-5 9-9V6l-9-4Zm-5 10 3 3 7-7" />
-      </symbol>
-      <symbol id="i-pen" viewBox="0 0 24 24">
-        <path d="m15 3 6 6-12 12-7 1 1-7L15 3ZM11 7l6 6" />
-      </symbol>
-      <symbol id="i-arrow" viewBox="0 0 24 24">
-        <path d="M4 12h16m-6-6 6 6-6 6" />
-      </symbol>
-      <symbol id="i-plus" viewBox="0 0 24 24">
-        <path d="M12 5v14M5 12h14" />
-      </symbol>
-      <symbol id="i-close" viewBox="0 0 24 24">
-        <path d="m6 6 12 12M18 6 6 18" />
-      </symbol>
-      <symbol id="i-copy" viewBox="0 0 24 24">
-        <rect x="8" y="8" width="13" height="13" rx="2" />
-        <path d="M16 8V3H3v13h5" />
-      </symbol>
-      <symbol id="i-download" viewBox="0 0 24 24">
-        <path d="M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4" />
-      </symbol>
-      <symbol id="i-settings" viewBox="0 0 24 24">
-        <path d="M4 6h16M4 12h16M4 18h16" />
-        <circle cx="9" cy="6" r="2" />
-        <circle cx="15" cy="12" r="2" />
-        <circle cx="9" cy="18" r="2" />
-      </symbol>
-      <symbol id="i-trash" viewBox="0 0 24 24">
-        <path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7" />
-      </symbol>
-      <symbol id="i-external" viewBox="0 0 24 24">
-        <path d="M14 3h7v7M21 3l-11 11M10 3H3v18h18v-7" />
-      </symbol>
-      <symbol id="i-menu" viewBox="0 0 24 24">
-        <path d="M4 6h16M4 12h16M4 18h16" />
-      </symbol>
-      <symbol id="i-spark" viewBox="0 0 24 24">
-        <path
-          d="m12 3 2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4L12 3ZM20 2v4m-2-2h4"
-        />
-      </symbol>
-      <symbol id="i-flask" viewBox="0 0 24 24">
-        <path
-          d="M9 3h6M10 3v6L4 19a1.3 1.3 0 0 0 1 2h14a1.3 1.3 0 0 0 1-2L14 9V3M7 15h10"
-        />
-      </symbol>
-    </svg>
-    <div class="app-shell">
-      <aside class="sidebar" id="sidebar">
-        <a class="brand" href="/" aria-label="Research Desk trang chủ"
-          ><span class="brand-mark"
-            ><svg><use href="#i-book" /></svg></span
-          ><span
-            >research<span class="brand-light">desk</span
-            ><small>AI RESEARCH ASSIST</small></span
-          ></a
-        >
-        <div class="workspace-label">
-          <span class="workspace-avatar">RA</span>
-          <div>Research workspace<small>Không gian nghiên cứu</small></div>
-          <span class="tiny-dot"></span>
-        </div>
-        <div class="nav-section-label">KHÔNG GIAN LÀM VIỆC</div>
-        <nav class="main-nav" aria-label="Điều hướng">
-          <button
-            class="nav-item active"
-            data-view="research"
-            aria-current="page"
-          >
-            <svg><use href="#i-search" /></svg>Nghiên cứu<span class="key-hint"
-              >01</span
-            >
-          </button>
-          <button class="nav-item" data-view="library">
-            <svg><use href="#i-stack" /></svg>Kho tài liệu<span
-              id="nav-doc-count"
-              class="count"
-              >0</span
-            >
-          </button>
-          <button class="nav-item" data-view="activity">
-            <svg><use href="#i-spark" /></svg>Hoạt động agent<span
-              class="nav-live-dot"
-              aria-hidden="true"
-            ></span>
-          </button>
-          <button class="nav-item" data-view="history">
-            <svg><use href="#i-clock" /></svg>Lịch sử phiên
-          </button>
-          <button class="nav-item" data-view="experiments">
-            <svg><use href="#i-flask" /></svg>Thực nghiệm
-            <span class="count">LAB</span>
-          </button>
-        </nav>
-        <div class="sidebar-section-heading">
-          <span>TÀI LIỆU TRONG PHIÊN</span
-          ><span id="selected-doc-count" class="selection-count">0/0</span
-          ><button
-            id="sidebar-upload"
-            class="icon-button"
-            aria-label="Tải tài liệu"
-          >
-            <svg><use href="#i-plus" /></svg>
-          </button>
-        </div>
-        <div class="source-scope-note">Chọn nguồn để giới hạn nghiên cứu.</div>
-        <div id="sidebar-documents" class="sidebar-documents"></div>
-        <button class="sidebar-dropzone" id="dropzone">
-          <svg><use href="#i-upload" /></svg><strong>Thêm tài liệu</strong
-          ><span>PDF, DOCX, TXT, Markdown</span>
-        </button>
-        <input
-          type="file"
-          id="file-input"
-          accept=".pdf,.docx,.txt,.md"
-          multiple
-          hidden
-        />
-        <div class="sidebar-bottom">
-          <div class="offline-note">
-            <span class="status-dot"></span
-            ><span id="connection-label">Đang kết nối…</span>
-          </div>
-          <button id="settings-button" class="nav-item">
-            <svg><use href="#i-settings" /></svg>Cấu hình mô hình
-          </button>
-          <div class="sidebar-footer">5 agent · Bằng chứng có thể truy vết</div>
-        </div>
-      </aside>
-      <button
-        id="sidebar-backdrop"
-        class="sidebar-backdrop"
-        aria-label="Đóng menu"
-        hidden
-      ></button>
-      <div class="content-shell">
-        <header class="topbar">
-          <div class="breadcrumb">
-            <button
-              class="icon-button mobile-menu"
-              id="mobile-menu"
-              aria-label="Mở menu"
-              aria-controls="sidebar"
-              aria-expanded="false"
-            >
-              <svg><use href="#i-menu" /></svg></button
-            ><svg><use href="#i-book" /></svg><span>Workspace</span
-            ><span class="slash">/</span
-            ><strong id="breadcrumb-view">Nghiên cứu</strong>
-          </div>
-          <div class="topbar-right">
-            <button
-              class="topbar-search"
-              id="workspace-search"
-              aria-label="Tìm tài liệu trong kho"
-            >
-              <svg><use href="#i-search" /></svg
-              ><span>Tìm trong kho tài liệu…</span><kbd>Ctrl K</kbd>
-            </button>
-            <span class="provider-pill" id="provider-pill"
-              ><span class="status-dot"></span>Đang kết nối</span
-            ><span class="user-avatar" title="Research workspace">RA</span>
-          </div>
-        </header>
-        <main id="main-content" tabindex="-1">
-          <section id="view-research" class="view">
-            <div class="page-heading">
-              <div>
-                <p class="eyebrow">
-                  <span class="status-dot"></span> KHÔNG GIAN NGHIÊN CỨU CỦA BẠN
-                </p>
-                <h1>Nghiên cứu tài liệu</h1>
-                <p>Khám phá ý tưởng. Kết nối tri thức. Luôn có bằng chứng.</p>
-              </div>
-              <div class="heading-note">
-                <span class="mini-agents" aria-hidden="true"
-                  ><svg><use href="#i-search" /></svg
-                  ><svg><use href="#i-book" /></svg
-                  ><svg><use href="#i-stack" /></svg
-                  ><svg><use href="#i-shield" /></svg
-                  ><svg><use href="#i-pen" /></svg></span
-                ><span>5 agent, một luồng nghiên cứu</span>
-              </div>
-            </div>
-            <ol class="research-steps" aria-label="Các bước nghiên cứu">
-              <li id="step-sources" class="current">
-                <span>01</span>
-                <div>Chọn tài liệu<small>Nguồn tri thức của bạn</small></div>
-                <svg><use href="#i-check" /></svg>
-              </li>
-              <li id="step-question">
-                <span>02</span>
-                <div>Đặt câu hỏi<small>Xác định điều cần khám phá</small></div>
-                <svg><use href="#i-check" /></svg>
-              </li>
-              <li id="step-report">
-                <span>03</span>
-                <div>
-                  Khám phá kết quả<small>Báo cáo đi cùng bằng chứng</small>
-                </div>
-                <svg><use href="#i-check" /></svg>
-              </li>
-            </ol>
-            <div class="research-layout">
-              <div class="research-compose">
-                <div id="mode-notice" class="mode-notice" hidden>
-                  <span class="notice-label">DEMO</span>
-                  <p>
-                    Đang dùng chế độ trích xuất không cần key. Bật mô hình trong
-                    <button id="notice-settings">Cấu hình</button> để nghiên cứu
-                    bằng AI.
-                  </p>
-                </div>
-                <section class="question-card" aria-labelledby="question-title">
-                  <div class="card-label">
-                    <svg><use href="#i-search" /></svg
-                    ><label id="question-title" for="question"
-                      >Bạn muốn tìm hiểu điều gì?</label
-                    ><span id="question-count">0 / 2000</span>
-                  </div>
-                  <textarea
-                    id="question"
-                    rows="4"
-                    maxlength="2000"
-                    aria-describedby="question-helper"
-                    placeholder="Ví dụ: RAG và Self-RAG khác nhau như thế nào về truy xuất và kiểm tra câu trả lời?"
-                  ></textarea>
-                  <p id="question-helper" class="input-helper">
-                    Hỏi cụ thể để tìm đúng bằng chứng trong tài liệu của bạn.
-                  </p>
-                  <details class="requirement-options">
-                    <summary>Các ý cần trả lời <span>tùy chọn</span></summary>
-                    <label for="requirements"
-                      >Mỗi dòng một ý, tối đa 12. Để trống để hệ thống phân tích
-                      câu hỏi.</label
-                    >
-                    <textarea
-                      id="requirements"
-                      rows="3"
-                      maxlength="6012"
-                      placeholder="Nhập các ý bạn muốn làm rõ (không bắt buộc)"
-                    ></textarea>
-                  </details>
-                  <div class="scope-control">
-                    <label
-                      >Phạm vi
-                      <select id="scope-mode" aria-label="Phạm vi tài liệu">
-                        <option value="selected">Tài liệu đã chọn</option>
-                        <option value="all">Toàn bộ kho</option>
-                      </select></label
-                    ><button id="choose-sources" class="secondary-button">
-                      Chọn tài liệu
-                    </button>
-                    <div id="scope-filenames" class="scope-filenames"></div>
-                  </div>
-                  <div class="question-tools">
-                    <div class="question-scope">
-                      <svg><use href="#i-stack" /></svg
-                      ><span id="scope-label">Chưa có tài liệu</span>
-                    </div>
-                    <button
-                      class="text-button"
-                      id="advanced-toggle"
-                      aria-expanded="false"
-                    >
-                      <svg><use href="#i-settings" /></svg>Tùy chỉnh</button
-                    ><button id="run-button" class="primary-button">
-                      <span>Bắt đầu nghiên cứu</span
-                      ><svg><use href="#i-arrow" /></svg></button
-                    ><button id="cancel-button" class="secondary-button" hidden>
-                      Dừng phiên
-                    </button>
-                  </div>
-                  <div id="advanced-panel" class="advanced-panel" hidden>
-                    <label
-                      >Chế độ chạy<select id="workflow-profile">
-                        <option value="balanced">
-                          Cân bằng · Writer local
-                        </option>
-                        <option value="academic">
-                          Học thuật · Writer qua model
-                        </option>
-                      </select></label
-                    >
-                    <label
-                      >Kiểu báo cáo<select id="report-style">
-                        <option value="overview">Tổng quan</option>
-                        <option value="comparison">So sánh</option>
-                        <option value="literature_review">
-                          Tổng quan tài liệu
-                        </option>
-                      </select></label
-                    ><label
-                      >Ngôn ngữ<select id="language">
-                        <option value="vi">Tiếng Việt</option>
-                        <option value="en">English</option>
-                      </select></label
-                    ><label
-                      >Truy xuất<select id="retrieval-mode">
-                        <option value="hybrid">
-                          Hybrid (nếu có embedding)
-                        </option>
-                        <option value="lexical">BM25</option>
-                      </select></label
-                    ><label
-                      >Số đoạn<select id="top-k">
-                        <option value="4">4 đoạn</option>
-                        <option value="8">8 đoạn</option>
-                        <option value="12" selected>12 đoạn</option>
-                      </select></label
-                    ><label
-                      >Số vòng tối đa<select id="max-rounds">
-                        <option value="1" selected>1 vòng</option>
-                        <option value="2">2 vòng</option>
-                      </select></label
-                    >
-                    <label class="cache-control"
-                      ><input type="checkbox" id="use-cache" checked />Tái sử
-                      dụng kết quả đã lưu</label
-                    >
-                  </div>
-                  <p class="keyboard-note">
-                    <kbd>Ctrl</kbd> + <kbd>Enter</kbd> để bắt đầu
-                    <span>·</span> Trích dẫn có thể mở về nguồn
-                  </p>
-                </section>
-                <div id="suggestion-area" class="suggestion-area">
-                  <span>THỬ HỎI VỚI TÀI LIỆU MẪU</span
-                  ><button
-                    class="prompt-chip"
-                    data-question="RAG và Self-RAG khác nhau như thế nào về truy xuất và kiểm tra câu trả lời?"
-                  >
-                    So sánh RAG & Self-RAG <span>↗</span></button
-                  ><button
-                    class="prompt-chip"
-                    data-question="Các hạn chế của RAG là gì và kiểm tra bằng chứng có vai trò như thế nào?"
-                  >
-                    Tìm hạn chế & khoảng trống <span>↗</span>
-                  </button>
-                </div>
-                <section id="empty-state" class="empty-state">
-                  <div class="empty-icon">
-                    <svg><use href="#i-file" /></svg>
-                  </div>
-                  <div>
-                    <h3 id="getting-started-title">
-                      Bắt đầu từ tài liệu bạn tin cậy
-                    </h3>
-                    <p>
-                      <span id="getting-started-note"
-                        >Tải tài liệu của bạn hoặc khám phá bằng bộ ghi chú
-                        mẫu.</span
-                      >
-                    </p>
-                  </div>
-                  <button id="seed-button" class="secondary-button">
-                    Thử tài liệu mẫu <span>↗</span>
-                  </button>
-                </section>
-              </div>
-              <aside class="research-aside" aria-label="Hướng dẫn nghiên cứu">
-                <article class="insight-card">
-                  <span class="insight-tag"
-                    ><svg><use href="#i-spark" /></svg> TỪ NGUỒN ĐẾN TRI
-                    THỨC</span
-                  >
-                  <div class="paper-illustration" aria-hidden="true">
-                    <div class="paper-sheet paper-back"></div>
-                    <div class="paper-sheet paper-front">
-                      <svg><use href="#i-book" /></svg><i></i><i></i><i></i
-                      ><span
-                        ><svg><use href="#i-check" /></svg> Có bằng chứng</span
-                      >
-                    </div>
-                    <span class="paper-spark">✦</span>
-                  </div>
-                  <h2>Mỗi nhận định,<br />một điểm tựa.</h2>
-                  <p>
-                    Đọc sâu hơn, hiểu rõ hơn với câu trả lời được đối chiếu từ
-                    chính tài liệu của bạn.
-                  </p>
-                  <div class="insight-footer">
-                    <svg><use href="#i-shield" /></svg> Trích dẫn nguyên văn,
-                    truy vết tới nguồn
-                  </div>
-                </article>
-                <article class="guide-card">
-                  <div class="guide-heading">
-                    <span class="guide-icon"
-                      ><svg><use href="#i-spark" /></svg
-                    ></span>
-                    <h3>Một câu hỏi hay bắt đầu từ…</h3>
-                  </div>
-                  <p>Mục tiêu rõ ràng và nguồn phù hợp. Bạn có thể thử:</p>
-                  <button
-                    class="prompt-chip guide-prompt"
-                    data-question="Tóm tắt những đóng góp chính và bằng chứng hỗ trợ trong các tài liệu đã chọn."
-                  >
-                    <svg><use href="#i-file" /></svg
-                    ><span>Tóm tắt đóng góp chính</span><span>↗</span>
-                  </button>
-                  <button
-                    class="prompt-chip guide-prompt"
-                    data-question="So sánh các phương pháp trong tài liệu đã chọn, nêu điểm giống, khác và dẫn chứng tương ứng."
-                  >
-                    <svg><use href="#i-stack" /></svg
-                    ><span>So sánh các phương pháp</span><span>↗</span>
-                  </button>
-                  <button
-                    class="prompt-chip guide-prompt"
-                    data-question="Các tài liệu đã chọn nêu những hạn chế nào và gợi ý hướng nghiên cứu tiếp theo ra sao?"
-                  >
-                    <svg><use href="#i-search" /></svg
-                    ><span>Tìm khoảng trống nghiên cứu</span><span>↗</span>
-                  </button>
-                </article>
-                <p class="aside-note">
-                  <svg><use href="#i-book" /></svg> Tri thức bắt đầu từ việc đặt
-                  câu hỏi.
-                </p>
-              </aside>
-            </div>
-            <section id="results-section" class="results-section" hidden>
-              <div class="section-heading results-heading">
-                <div>
-                  <div class="eyebrow">RESEARCH OUTPUT</div>
-                  <h2 id="result-title">Kết quả nghiên cứu</h2>
-                </div>
-                <div class="report-actions">
-                  <button
-                    id="copy-button"
-                    class="icon-button"
-                    aria-label="Sao chép báo cáo"
-                  >
-                    <svg><use href="#i-copy" /></svg></button
-                  ><a id="export-md" class="secondary-button" href="#"
-                    ><svg><use href="#i-download" /></svg>Markdown</a
-                  ><a id="export-json" class="text-button" href="#">JSON</a>
-                </div>
-              </div>
-              <div class="metrics-row" id="metrics-row"></div>
-              <div
-                id="coverage-panel"
-                class="coverage-panel"
-                aria-live="polite"
-                hidden
-              ></div>
-              <div id="result-warnings" class="result-warnings"></div>
-              <div class="result-layout">
-                <article class="report-card">
-                  <div class="tab-row" role="tablist">
-                    <button
-                      role="tab"
-                      aria-selected="true"
-                      class="tab active"
-                      data-tab="report"
-                    >
-                      Báo cáo</button
-                    ><button
-                      role="tab"
-                      aria-selected="false"
-                      class="tab"
-                      data-tab="checks"
-                    >
-                      Kiểm tra nhận định
-                      <span id="checks-count">0</span>
-                    </button>
-                  </div>
-                  <div
-                    id="report-content"
-                    class="report-content tab-content"
-                  ></div>
-                  <div
-                    id="checks-content"
-                    class="checks-content tab-content"
-                    hidden
-                  ></div>
-                </article>
-                <aside class="evidence-panel">
-                  <div class="evidence-panel-heading">
-                    <h3>Bằng chứng</h3>
-                    <span id="evidence-count" class="count">0</span>
-                  </div>
-                  <p class="evidence-note">
-                    Trích nguyên văn · truy vết tới nguồn
-                  </p>
-                  <label class="search-field evidence-search"
-                    ><svg><use href="#i-search" /></svg
-                    ><input
-                      id="evidence-search"
-                      type="search"
-                      placeholder="Tìm trong bằng chứng…"
-                      aria-label="Tìm trong bằng chứng"
-                  /></label>
-                  <p id="evidence-no-match" class="filter-empty" hidden>
-                    Không có bằng chứng phù hợp.
-                  </p>
-                  <div id="evidence-list"></div>
-                </aside>
-              </div>
-            </section>
-          </section>
-          <section id="view-activity" class="view" hidden>
-            <div class="simple-heading">
-              <div class="eyebrow">
-                <span class="status-dot"></span> LUỒNG SUY LUẬN ĐA TÁC TỬ
-              </div>
-              <h1>Hoạt động agent</h1>
-              <p id="activity-run">Chưa có phiên nghiên cứu.</p>
-            </div>
-            <div class="activity-toolbar">
-              <button class="secondary-button" id="back-research">
-                Về câu hỏi
-              </button>
-              <button class="secondary-button" id="activity-cancel" hidden>
-                Dừng phiên
-              </button>
-              <a class="text-button" id="export-trace" hidden
-                >Tải nhật ký JSON</a
-              >
-              <label
-                >Lọc agent
-                <select id="trace-filter">
-                  <option value="all">Tất cả</option>
-                  <option value="retrieval">Retrieval</option>
-                  <option value="reader">Reader</option>
-                  <option value="summarizer">Summarizer</option>
-                  <option value="fact_checker">Fact Checker</option>
-                  <option value="writer">Writer</option>
-                  <option value="orchestrator">Orchestrator</option>
-                </select></label
-              >
-            </div>
-            <section class="pipeline-panel" aria-labelledby="pipeline-title">
-              <div class="section-heading">
-                <div>
-                  <h2 id="pipeline-title">Luồng xử lý</h2>
-                  <span>Trạng thái thực tế của phiên đang theo dõi.</span>
-                </div>
-                <button
-                  type="button"
-                  id="architecture-button"
-                  class="text-button"
-                >
-                  Cách các agent phối hợp
-                </button>
-                <span class="subtle-badge" id="pipeline-status">SẴN SÀNG</span>
-              </div>
-              <div class="agent-pipeline" id="agent-pipeline">
-                <div class="agent-node" data-agent="retrieval">
-                  <div class="agent-icon">
-                    <svg><use href="#i-search" /></svg><span>01</span>
-                  </div>
-                  <strong>Retrieval</strong><span>Tìm nguồn liên quan</span>
-                  <div class="agent-status">Đang chờ</div>
-                </div>
-                <span class="pipeline-arrow">→</span>
-                <div class="agent-node" data-agent="reader">
-                  <div class="agent-icon">
-                    <svg><use href="#i-book" /></svg><span>02</span>
-                  </div>
-                  <strong>Reader</strong><span>Đọc & trích bằng chứng</span>
-                  <div class="agent-status">Đang chờ</div>
-                </div>
-                <span class="pipeline-arrow">→</span>
-                <div class="agent-node" data-agent="summarizer">
-                  <div class="agent-icon">
-                    <svg><use href="#i-stack" /></svg><span>03</span>
-                  </div>
-                  <strong>Summarizer</strong><span>Kết nối nhận định</span>
-                  <div class="agent-status">Đang chờ</div>
-                </div>
-                <span class="pipeline-arrow">→</span>
-                <div class="agent-node" data-agent="fact_checker">
-                  <div class="agent-icon">
-                    <svg><use href="#i-shield" /></svg><span>04</span>
-                  </div>
-                  <strong>Fact Checker</strong><span>Kiểm tra mức hỗ trợ</span>
-                  <div class="agent-status">Đang chờ</div>
-                </div>
-                <span class="pipeline-arrow">→</span>
-                <div class="agent-node" data-agent="writer">
-                  <div class="agent-icon">
-                    <svg><use href="#i-pen" /></svg><span>05</span>
-                  </div>
-                  <strong>Writer</strong><span>Viết báo cáo có nguồn</span>
-                  <div class="agent-status">Đang chờ</div>
-                </div>
-              </div>
-              <div
-                class="pipeline-live"
-                id="pipeline-live"
-                hidden
-                aria-live="polite"
-              ></div>
-            </section>
-            <div class="activity-detail-layout">
-              <div class="trace-column">
-                <div class="trace-heading">
-                  <span>NHẬT KÝ THỰC THI</span
-                  ><span id="trace-count" class="count">0 sự kiện</span>
-                </div>
-                <div id="activity-empty" class="lab-empty">
-                  <svg><use href="#i-spark" /></svg>
-                  <h3>Sẵn sàng cùng bạn khám phá</h3>
-                  <p>
-                    Đặt câu hỏi ở trang Nghiên cứu để theo dõi từng bước xử lý
-                    tại đây.
-                  </p>
-                </div>
-                <div
-                  id="trace-content"
-                  class="trace-content"
-                  aria-label="Nhật ký hoạt động"
-                ></div>
-              </div>
-              <aside class="activity-inspector">
-                <article class="guide-card">
-                  <div class="guide-heading">
-                    <svg><use href="#i-stack" /></svg>
-                    <h3>Phạm vi phiên nghiên cứu</h3>
-                  </div>
-                  <p id="activity-sources">Chưa có phiên nghiên cứu.</p>
-                  <div class="inspector-rule"></div>
-                  <p>
-                    Phạm vi được lưu khi bắt đầu phiên. Mở từng sự kiện để xem
-                    nguồn và quyết định của agent.
-                  </p>
-                </article>
-                <article class="guide-card">
-                  <div class="guide-heading">
-                    <svg><use href="#i-shield" /></svg>
-                    <h3>Đọc kết quả có cơ sở</h3>
-                  </div>
-                  <p>
-                    Mức hỗ trợ của từng nhận định được hiển thị trong báo cáo.
-                    Nhấn vào trích dẫn để đọc đoạn nguồn và ngữ cảnh.
-                  </p>
-                  <span class="verified-note"
-                    ><svg><use href="#i-check" /></svg> Bằng chứng có thể truy
-                    vết</span
-                  >
-                </article>
-              </aside>
-            </div>
-          </section>
-          <section id="view-library" class="view" hidden>
-            <div class="simple-heading">
-              <div class="eyebrow">YOUR KNOWLEDGE BASE</div>
-              <h1>Kho tài liệu</h1>
-              <p>Nguồn tri thức cho các phiên nghiên cứu của bạn.</p>
-            </div>
-            <div class="library-overview" aria-label="Tổng quan kho tài liệu">
-              <article>
-                <span class="overview-icon"
-                  ><svg><use href="#i-stack" /></svg
-                ></span>
-                <div>
-                  <strong id="library-total">0</strong
-                  ><span>Tài liệu trong kho</span>
-                </div>
-              </article>
-              <article>
-                <span class="overview-icon violet"
-                  ><svg><use href="#i-file" /></svg
-                ></span>
-                <div>
-                  <strong id="library-chunks">0</strong
-                  ><span>Đoạn có thể truy xuất</span>
-                </div>
-              </article>
-              <article>
-                <span class="overview-icon amber"
-                  ><svg><use href="#i-check" /></svg
-                ></span>
-                <div>
-                  <strong id="library-selected">0</strong
-                  ><span>Nguồn đang được chọn</span>
-                </div>
-              </article>
-            </div>
-            <div class="library-tools">
-              <label class="search-field library-search"
-                ><svg><use href="#i-search" /></svg
-                ><input
-                  type="search"
-                  id="library-search"
-                  placeholder="Tìm tên tài liệu…"
-                  aria-label="Tìm trong kho tài liệu"
-              /></label>
-              <button class="primary-button" id="library-upload">
-                <svg><use href="#i-upload" /></svg>Tải tài liệu</button
-              ><button class="secondary-button" id="library-seed">
-                Nạp bộ mẫu</button
-              ><button class="text-button" id="reindex-button">
-                <svg><use href="#i-stack" /></svg>Reindex embedding
-              </button>
-            </div>
-            <details class="paper-discovery">
-              <summary>Tìm bài liên quan trên arXiv</summary>
-              <form id="paper-search-form">
-                <label for="paper-query">Từ khóa hoặc tiêu đề bài báo</label>
-                <div class="paper-query-row">
-                  <input type="search" id="paper-query" minlength="3" maxlength="300" required />
-                  <button class="secondary-button" type="submit">Tìm trên arXiv</button>
-                </div>
-              </form>
-              <p id="paper-status" role="status" aria-live="polite"></p>
-              <ul id="paper-results"></ul>
-            </details>
-            <div class="document-table-wrap">
-              <table class="document-table">
-                <thead>
-                  <tr>
-                    <th>Tài liệu</th>
-                    <th>Loại</th>
-                    <th>Trang PDF</th>
-                    <th>Đoạn</th>
-                    <th>Thao tác</th>
-                  </tr>
-                </thead>
-                <tbody id="document-table-body"></tbody>
-              </table>
-            </div>
-            <p class="table-footnote">
-              DOCX, TXT và Markdown được dẫn theo đoạn văn bản; hệ thống không
-              suy đoán số trang.
-            </p>
-            <details class="library-maintenance">
-              <summary>
-                <svg><use href="#i-settings" /></svg> Quản lý chỉ mục
-                <span>Dành cho thay đổi cấu hình truy xuất</span>
-              </summary>
-              <div>
-                <p>Tạo lại chỉ mục sau khi đổi mô hình hoặc cách chia đoạn.</p>
-                <button class="secondary-button" id="rebuild-button">
-                  Chia lại đoạn & tạo lại chỉ mục
-                </button>
-              </div>
-            </details>
-          </section>
-          <section id="view-experiments" class="view" hidden>
-            <div class="simple-heading">
-              <div class="eyebrow">RESEARCH LAB / 02</div>
-              <h1>Thực nghiệm</h1>
-              <p>
-                So sánh retriever gốc và model bạn fine-tune trên cùng tập kiểm
-                tra.
-              </p>
-            </div>
-            <div class="lab-intro">
-              <div>
-                <span class="subtle-badge">THỰC NGHIỆM CÓ THỂ TÁI LẬP</span>
-                <h2>Từ dữ liệu đến bằng chứng</h2>
-                <p>
-                  QASPER → fine-tune E5 → đánh giá retrieval → đưa checkpoint
-                  vào hệ thống.
-                </p>
-              </div>
-              <svg class="lab-symbol"><use href="#i-stack" /></svg>
-            </div>
-            <div class="lab-steps">
-              <article>
-                <span>01 / DATASET</span>
-                <h3>Chuẩn bị QASPER</h3>
-                <p>
-                  Giữ nguyên train, validation, test theo bài báo; dùng đoạn
-                  chứng cứ làm nhãn.
-                </p>
-                <code>python scripts/download_dataset.py</code
-                ><code>python scripts/prepare_dataset.py</code>
-              </article>
-              <article>
-                <span>02 / FINE-TUNE</span>
-                <h3>Huấn luyện trên Kaggle</h3>
-                <p>
-                  GPU T4, E5 nhỏ, loss MNRL. Tải checkpoint đầy đủ về máy để
-                  chạy CPU.
-                </p>
-                <code>notebooks/01_train_embedding.ipynb</code>
-                <p>Hướng dẫn: <strong>docs/TRAINING.md</strong></p>
-              </article>
-              <article>
-                <span>03 / EVALUATE</span>
-                <h3>Đánh giá trước–sau</h3>
-                <p>
-                  Recall, MRR, nDCG và độ trễ truy xuất. Nhập JSON kết quả thật
-                  bên dưới.
-                </p>
-                <code>python scripts/evaluate_retrieval.py --help</code>
-              </article>
-            </div>
-            <div class="section-heading">
-              <div>
-                <h2>Kết quả benchmark</h2>
-                <span
-                  >Đánh giá retrieval ở cấp đoạn; độc lập với độ đúng của báo
-                  cáo.</span
-                >
-              </div>
-              <button class="secondary-button" id="import-benchmark">
-                Nhập JSON <svg><use href="#i-upload" /></svg>
-              </button>
-            </div>
-            <input
-              type="file"
-              id="benchmark-input"
-              accept=".json,application/json"
-              hidden
-            />
-            <div id="benchmark-summary" class="benchmark-summary"></div>
-            <div id="benchmark-results" class="benchmark-results">
-              <div class="lab-empty">
-                <svg><use href="#i-shield" /></svg>
-                <h3>Chưa có kết quả thực nghiệm</h3>
-                <p>
-                  Nhập file do evaluate_retrieval.py tạo để xem so sánh. Không
-                  có số liệu mô phỏng.
-                </p>
-              </div>
-            </div>
-          </section>
-          <section id="view-history" class="view" hidden>
-            <div class="simple-heading">
-              <div class="eyebrow">YOUR RESEARCH JOURNEY</div>
-              <h1>Lịch sử nghiên cứu</h1>
-              <p>
-                Tiếp tục đọc báo cáo và kiểm tra bằng chứng từ các phiên đã lưu.
-              </p>
-            </div>
-            <div id="history-list" class="history-list"></div>
-          </section>
-        </main>
-        <footer class="main-footer">
-          <span
-            >researchdesk <span class="footer-dot">·</span> AI Research Assist
-            Multi-Agent RAG</span
-          ><span>Đọc nguồn. Kiểm tra nhận định. Giữ quyền đánh giá.</span>
-        </footer>
-      </div>
-    </div>
-    <dialog id="scope-dialog" aria-labelledby="scope-title">
-      <div class="dialog-heading">
-        <h2 id="scope-title">Chọn tài liệu nghiên cứu</h2>
-        <button class="icon-button close-dialog" aria-label="Đóng">×</button>
-      </div>
-      <input
-        type="search"
-        id="scope-search"
-        placeholder="Tìm theo tên tài liệu"
-        aria-label="Tìm tài liệu"
-      />
-      <div id="scope-documents" class="scope-documents"></div>
-      <div class="scope-actions">
-        <button id="scope-clear" class="text-button">Bỏ chọn tất cả</button>
-        <button class="primary-button close-dialog">Xong</button>
-      </div>
-    </dialog>
-    <dialog id="settings-dialog" aria-labelledby="settings-title">
-      <div class="dialog-heading">
-        <div>
-          <span class="eyebrow">HẠ TẦNG NGHIÊN CỨU</span>
-          <h2 id="settings-title">Cấu hình mô hình & định tuyến</h2>
-        </div>
-        <button class="icon-button close-dialog" aria-label="Đóng">
-          <svg><use href="#i-close" /></svg>
-        </button>
-      </div>
-      <div id="settings-summary" class="settings-summary"></div>
-      <section class="gpu-settings" aria-labelledby="gpu-settings-title">
-        <div class="gpu-heading">
-          <span class="guide-icon"
-            ><svg><use href="#i-stack" /></svg
-          ></span>
-          <div>
-            <h3 id="gpu-settings-title">Kết nối GPU từ Kaggle</h3>
-            <p>Dùng model embedding đã fine-tune qua Cloudflare Tunnel.</p>
-          </div>
-          <span id="gpu-active-badge" class="gpu-badge">Chưa bật</span>
-        </div>
-        <form id="gpu-config-form" autocomplete="off">
-          <fieldset id="gpu-fields" disabled>
-            <div class="gpu-form-grid">
-              <label class="gpu-field gpu-wide" for="gpu-family">
-                Họ model embedding
-                <select id="gpu-family">
-                  <option value="e5">Multilingual E5</option>
-                  <option value="qwen3-0.6b">Qwen3 Embedding 0.6B</option>
-                  <option value="qwen3-4b">Qwen3 Embedding 4B</option>
-                </select>
-                <small
-                  >Chọn đúng họ model đang chạy trên GPU. Checkpoint khác cần
-                  cập nhật lại chỉ mục.</small
-                >
-              </label>
-              <label class="gpu-field gpu-wide" for="gpu-url">
-                URL Cloudflare / GPU endpoint
-                <input
-                  id="gpu-url"
-                  type="url"
-                  required
-                  maxlength="2048"
-                  placeholder="https://your-tunnel.trycloudflare.com"
-                  spellcheck="false"
-                />
-                <small
-                  >Dán URL notebook đã in ra. Có hoặc không có /v1 đều
-                  được.</small
-                >
-              </label>
-              <label class="gpu-field" for="gpu-key">
-                Key truy cập GPU
-                <input
-                  id="gpu-key"
-                  type="password"
-                  maxlength="4096"
-                  autocomplete="new-password"
-                  placeholder="Key riêng bạn đã đặt trong notebook"
-                  spellcheck="false"
-                />
-                <small id="gpu-key-note"
-                  >Key riêng của notebook, tối thiểu 32 ký tự.</small
-                >
-              </label>
-              <label class="gpu-field" for="gpu-model">
-                <span>Model ID <span class="gpu-optional">tùy chọn</span></span>
-                <input
-                  id="gpu-model"
-                  type="text"
-                  maxlength="160"
-                  placeholder="research-e5-… hoặc research-qwen3-…"
-                  spellcheck="false"
-                />
-                <small
-                  >Để trống để tự nhận diện; hoặc dán ID từ notebook để đối
-                  chiếu.</small
-                >
-              </label>
-            </div>
-            <details class="gpu-advanced">
-              <summary>Tùy chọn embedding</summary>
-              <div class="gpu-form-grid">
-                <label class="gpu-field" for="gpu-tokenizer">
-                  Tokenizer trên máy này
-                  <input
-                    id="gpu-tokenizer"
-                    type="text"
-                    required
-                    maxlength="300"
-                    value="intfloat/multilingual-e5-base"
-                    spellcheck="false"
-                  />
-                  <small
-                    >Model ID hoặc thư mục tokenizer đúng với checkpoint đang
-                    chạy.</small
-                  >
-                </label>
-                <label class="gpu-field" for="gpu-batch">
-                  Số đoạn mỗi request
-                  <input
-                    id="gpu-batch"
-                    type="number"
-                    min="1"
-                    max="32"
-                    value="16"
-                    required
-                  />
-                </label>
-              </div>
-            </details>
-            <div class="gpu-actions">
-              <button id="gpu-test" class="secondary-button" type="button">
-                <svg><use href="#i-check" /></svg>Kiểm tra kết nối
-              </button>
-              <button id="gpu-save" class="primary-button" type="submit">
-                Lưu và áp dụng
-              </button>
-              <button
-                id="gpu-restore"
-                class="text-button"
-                type="button"
-                disabled
-              >
-                Khôi phục cấu hình gốc
-              </button>
-            </div>
-          </fieldset>
-        </form>
-        <p
-          id="gpu-feedback"
-          class="gpu-feedback"
-          role="status"
-          aria-live="polite"
-        >
-          Đang đọc cấu hình GPU…
-        </p>
-        <div id="gpu-index-panel" class="gpu-index-panel" hidden>
-          <p id="gpu-index-note"></p>
-          <button id="gpu-rebuild" class="secondary-button" type="button">
-            <svg><use href="#i-stack" /></svg>Cập nhật chỉ mục tài liệu
-          </button>
-        </div>
-        <p class="gpu-privacy">
-          Key chỉ được lưu ở backend, không được gửi lại trình duyệt. Cấu hình
-          áp dụng ngay. Giữ notebook và tunnel đang chạy khi sử dụng GPU.
-        </p>
-      </section>
-      <div class="routing-heading">
-        <span class="guide-icon"
-          ><svg><use href="#i-spark" /></svg
-        ></span>
-        <div>
-          <h3 class="dialog-subheading">Ma trận định tuyến tác tử</h3>
-          <p>Mô hình và phương thức thực thi cho từng bước nghiên cứu.</p>
-        </div>
-      </div>
-      <div id="agent-routes" class="route-list"></div>
-      <div id="diagnostics" class="diagnostics"></div>
-      <button id="clear-cache" class="secondary-button">
-        Xóa cache phản hồi
-      </button>
-      <p class="dialog-note">
-        Mô hình được cấu hình ở backend. API key được giữ trên máy chủ và không
-        gửi về giao diện.
-      </p>
-      <div class="config-guide">
-        <h3>Dùng Gemini</h3>
-        <pre>
-RA_LLM_PROVIDER=gemini
-RA_GEMINI_API_KEY=your-key
-RA_LLM_MODEL=gemini-3.5-flash-lite
-RA_WORKFLOW_PROFILE=balanced</pre>
-        <h3>Dùng mô hình cục bộ</h3>
-        <pre>
-RA_LLM_PROVIDER=ollama
-RA_LLM_MODEL=qwen3:8b</pre>
-        <h3>Thêm semantic retrieval</h3>
-        <pre>
-RA_EMBEDDING_PROVIDER=sentence-transformers
-RA_EMBEDDING_MODEL=intfloat/multilingual-e5-small</pre>
-        <p>
-          Cài extra <code>local-models</code>, sửa <code>.env</code>, khởi động
-          lại backend rồi Reindex nếu đã có tài liệu.
-        </p>
-      </div>
-      <a class="text-button" href="/docs" target="_blank" rel="noopener"
-        >Xem API Swagger <svg><use href="#i-external" /></svg></a
-      ><button id="logout-button" class="text-button" hidden>
-        Đăng xuất workspace
-      </button>
-    </dialog>
-    <dialog id="architecture-dialog">
-      <div class="dialog-heading">
-        <div>
-          <span class="eyebrow">FIVE AGENTS</span>
-          <h2>Luồng nghiên cứu có kiểm chứng</h2>
-        </div>
-        <button class="icon-button close-dialog" aria-label="Đóng">
-          <svg><use href="#i-close" /></svg>
-        </button>
-      </div>
-      <p class="dialog-note">
-        Orchestrator điều phối tối đa hai vòng. Thiếu bằng chứng thì truy xuất
-        bổ sung; Writer chỉ nhận nội dung đã kiểm tra.
-      </p>
-      <div id="architecture-content"></div>
-    </dialog>
-    <dialog id="source-dialog">
-      <div class="dialog-heading">
-        <div>
-          <span class="eyebrow">SOURCE EVIDENCE</span>
-          <h2 id="source-title">Bằng chứng</h2>
-        </div>
-        <button class="icon-button close-dialog" aria-label="Đóng">
-          <svg><use href="#i-close" /></svg>
-        </button>
-      </div>
-      <div id="source-dialog-content"></div>
-    </dialog>
-    <dialog id="login-dialog">
-      <div class="dialog-heading">
-        <div>
-          <span class="eyebrow">PRIVATE WORKSPACE</span>
-          <h2>Đăng nhập workspace</h2>
-        </div>
-      </div>
-      <p>Nhập mã truy cập do người chạy backend cấu hình.</p>
-      <form id="login-form">
-        <label for="access-token">Mã truy cập</label
-        ><input
-          id="access-token"
-          type="password"
-          autocomplete="current-password"
-          required
-          maxlength="256"
-        />
-        <p id="login-error" class="error-text" aria-live="polite"></p>
-        <button type="submit" class="primary-button">
-          Mở workspace <svg><use href="#i-arrow" /></svg>
-        </button>
+    <dialog id="workspaceLogin">
+      <form id="workspaceLoginForm">
+        <h2>Đăng nhập workspace</h2>
+        <label
+          >Mã truy cập
+          <input
+            id="workspaceAccessToken"
+            type="password"
+            required
+            autocomplete="current-password" /></label
+        ><button>Đăng nhập</button>
+        <p id="workspaceLoginError" role="alert"></p>
       </form>
     </dialog>
-    <section
-      id="upload-status"
-      class="upload-status"
-      aria-labelledby="upload-title"
-      hidden
-    >
-      <div class="upload-status-heading">
-        <div>
-          <strong id="upload-title">Đang tải tài liệu</strong>
-          <span id="upload-count"></span>
+    <!-- Antigravity Interactive Background Canvas -->
+    <canvas id="antigravity-bg"></canvas>
+
+    <div class="workspace-layout">
+      <!-- 1. LEFT SIDEBAR (ANTIGRAVITY 2.0 MINIMALIST) -->
+      <aside class="sidebar-panel" id="sidebar">
+        <div class="sidebar-header">
+          <div class="brand-badge">
+            <div class="brand-icon" title="Research Assist">
+              <img
+                src="/assets/workspace-logo.svg?v=20261106_flat_sticker_v3"
+                alt=""
+                class="brand-logo-img"
+              />
+            </div>
+            <span class="brand-title">Research Assist</span>
+          </div>
+          <button
+            class="new-chat-pill-btn"
+            id="newChatBtn"
+            title="Cuộc trò chuyện mới (Ctrl+K)"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            <span>Mới</span>
+          </button>
         </div>
-        <button
-          id="upload-close"
-          class="icon-button"
-          aria-label="Đóng tiến độ tải tài liệu"
-          hidden
-        >
-          <svg><use href="#i-close" /></svg>
-        </button>
-      </div>
-      <p id="upload-filename" class="upload-filename"></p>
-      <div class="upload-file-facts">
-        <span id="upload-size">0 B</span>
-        <span id="upload-input-details">Đang nhận tài liệu</span>
-      </div>
-      <div class="upload-progress-line">
-        <progress
-          id="upload-progress"
-          max="100"
-          value="0"
-          aria-label="Tiến độ truyền tài liệu"
-        ></progress>
-        <span id="upload-percent"></span>
-      </div>
-      <p
-        id="upload-message"
-        class="upload-message"
-        role="status"
-        aria-live="polite"
-      ></p>
-      <p id="upload-speed" class="upload-speed"></p>
-      <div class="upload-metrics">
-        <div>
-          <span>Đã truyền</span><strong id="upload-transferred">0 B</strong>
+
+        <!-- NỬA TRÊN: LỊCH SỬ ĐOẠN CHAT (CHỈ HIỂN THỊ TIÊU ĐỀ GỌN GÀNG Y NHƯ THẬT) -->
+        <div class="sidebar-half-section history-half">
+          <div class="sidebar-section-header">
+            <div class="section-title-wrap">
+              <span class="section-icon-badge" title="Lịch Sử Nghiên Cứu">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+              </span>
+              <span class="section-count" id="historyCountBadge">0</span>
+            </div>
+            <div class="section-actions-right">
+              <div class="dropdown-anchor">
+                <button
+                  class="section-more-btn"
+                  id="historyMoreBtn"
+                  title="Tùy chọn lịch sử"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <circle cx="12" cy="5" r="1"></circle>
+                    <circle cx="12" cy="12" r="1"></circle>
+                    <circle cx="12" cy="19" r="1"></circle>
+                  </svg>
+                </button>
+                <div class="section-dropdown-menu" id="historyDropdownMenu">
+                  <button class="dropdown-item" id="clearAllHistoryBtn">
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path
+                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                      ></path>
+                      <line x1="10" y1="11" x2="10" y2="17"></line>
+                      <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
+                    <span>Xóa toàn bộ lịch sử</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="history-list" id="chatHistoryList">
+            <div class="doc-empty-state">Chưa có lịch sử</div>
+          </div>
         </div>
-        <div>
-          <span>Đã xử lý</span><strong id="upload-work">Chưa xác định</strong>
+
+        <div class="sidebar-half-divider"></div>
+
+        <!-- NỬA DƯỚI: KHO TÀI LIỆU -->
+        <div class="sidebar-half-section docs-half">
+          <div class="sidebar-section-header">
+            <div class="section-title-wrap">
+              <span class="section-icon-badge" title="Kho Tài Liệu">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                  <path
+                    d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
+                  ></path>
+                </svg>
+              </span>
+              <span class="section-count" id="docCountBadge">0</span>
+            </div>
+            <div class="section-actions-right">
+              <button
+                class="auto-scout-toggle-btn"
+                id="autoScoutToggleBtn"
+                aria-pressed="false"
+                title="Bật/Tắt chế độ Tự động tìm bài báo toàn cầu (Agent 0 - ArXiv)"
+              >
+                <span class="scout-btn-text">Auto-Scout</span>
+              </button>
+              <div class="dropdown-anchor">
+                <button
+                  class="section-more-btn"
+                  id="docMoreBtn"
+                  title="Tùy chọn tài liệu"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <circle cx="12" cy="5" r="1"></circle>
+                    <circle cx="12" cy="12" r="1"></circle>
+                    <circle cx="12" cy="19" r="1"></circle>
+                  </svg>
+                  <span
+                    class="more-dot-indicator"
+                    id="docMoreDot"
+                    style="display: none"
+                  ></span>
+                </button>
+                <div class="section-dropdown-menu" id="docDropdownMenu">
+                  <button class="dropdown-item" id="deleteDocsBtn">
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path
+                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                      ></path>
+                      <line x1="10" y1="11" x2="10" y2="17"></line>
+                      <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
+                    <span id="deleteDocsBtnLabel">Xóa tài liệu đã chọn</span>
+                    <span
+                      class="del-count-badge"
+                      id="delDocsCountBadge"
+                      style="display: none"
+                      >0</span
+                    >
+                  </button>
+                  <button class="dropdown-item" id="toggleDocSelectModeBtn">
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polyline points="9 11 12 14 22 4"></polyline>
+                      <path
+                        d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
+                      ></path>
+                    </svg>
+                    <span>Chọn nhiều để xóa</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="doc-bulk-bar" id="docBulkBar" style="display: none">
+            <label class="bulk-select-all-label">
+              <input type="checkbox" id="selectAllDocsChk" />
+              <span>Chọn tất cả</span>
+            </label>
+            <div class="bulk-actions-right">
+              <button class="bulk-confirm-del-btn" id="confirmBulkDelDocsBtn">
+                Xóa đã chọn
+              </button>
+              <button class="bulk-cancel-btn" id="cancelBulkDelDocsBtn">
+                Bỏ chọn
+              </button>
+            </div>
+          </div>
+          <div class="sidebar-search-box">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.2"
+              class="search-icon"
+            >
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input
+              type="text"
+              id="docSearchInput"
+              class="doc-search-input"
+              placeholder="Lọc tài liệu..."
+            />
+          </div>
+          <div class="document-list" id="docList">
+            <div class="doc-empty-state">Đang tải tài liệu...</div>
+          </div>
         </div>
-        <div>
-          <span>Đã chạy</span><strong id="upload-elapsed">00:00</strong>
+      </aside>
+
+      <!-- 2. CENTER CANVAS -->
+      <main class="chat-canvas" id="mainCanvas">
+        <!-- Top-Right Floating Panel Controls (Khối điều khiển bố cục góc cao bên phải) -->
+        <div class="canvas-top-right-bar" id="canvasTopRightBar">
+          <button
+            class="layout-toggle-btn active"
+            id="toggleSidebarBtn"
+            title="Đóng/Mở Sidebar Trái (Ctrl+S)"
+          >
+            <svg
+              width="18"
+              height="16"
+              viewBox="0 0 20 18"
+              fill="none"
+              class="panel-layout-icon"
+            >
+              <path
+                class="panel-fill-left"
+                d="M 1.5 4.5 C 1.5 2.8 2.8 1.5 4.5 1.5 L 7.5 1.5 L 7.5 16.5 L 4.5 16.5 C 2.8 16.5 1.5 15.2 1.5 13.5 Z"
+                fill="currentColor"
+              />
+              <line
+                x1="7.5"
+                y1="1.5"
+                x2="7.5"
+                y2="16.5"
+                stroke="currentColor"
+                stroke-width="1.8"
+              />
+              <rect
+                x="1.5"
+                y="1.5"
+                width="17"
+                height="15"
+                rx="3"
+                stroke="currentColor"
+                stroke-width="1.8"
+              />
+            </svg>
+          </button>
+          <button
+            class="layout-toggle-btn active"
+            id="toggleSidecarBtn"
+            title="Đóng/Mở Bảng Tài Liệu &amp; Báo Cáo Phải (Ctrl+B)"
+          >
+            <svg
+              width="18"
+              height="16"
+              viewBox="0 0 20 18"
+              fill="none"
+              class="panel-layout-icon"
+            >
+              <path
+                class="panel-fill-right"
+                d="M 12.5 1.5 L 15.5 1.5 C 17.2 1.5 18.5 2.8 18.5 4.5 L 18.5 13.5 C 18.5 15.2 17.2 16.5 15.5 16.5 L 12.5 16.5 Z"
+                fill="currentColor"
+              />
+              <line
+                x1="12.5"
+                y1="1.5"
+                x2="12.5"
+                y2="16.5"
+                stroke="currentColor"
+                stroke-width="1.8"
+              />
+              <rect
+                x="1.5"
+                y="1.5"
+                width="17"
+                height="15"
+                rx="3"
+                stroke="currentColor"
+                stroke-width="1.8"
+              />
+            </svg>
+          </button>
+          <div id="activeScopeChip" style="display: none">
+            <span id="activeDocName"></span>
+          </div>
         </div>
-        <div>
-          <span>Còn lại · ước tính</span
-          ><strong id="upload-remaining">Đang tính</strong>
+
+        <!-- Message History Container (Canvas Free Flow) -->
+        <div class="message-feed" id="messageFeed">
+          <!-- Welcome Hero Screen (Tiêu chí 14, 15) -->
+          <div class="welcome-hero" id="welcomeHero">
+            <div class="hero-glyph">
+              <svg
+                width="28"
+                height="28"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+              >
+                <polygon
+                  points="12 2 19 8.5 19 15.5 12 22 5 15.5 5 8.5 12 2"
+                ></polygon>
+                <line x1="12" y1="22" x2="12" y2="15.5"></line>
+                <polyline points="19 8.5 12 15.5 5 8.5"></polyline>
+              </svg>
+            </div>
+            <h1 class="hero-title">Bạn muốn nghiên cứu điều gì hôm nay?</h1>
+            <p class="hero-desc">
+              Hệ thống trợ lý học thuật 5 tác tử. Đọc tài liệu, đối soát nhận
+              định và mở lại nguồn trích dẫn.
+            </p>
+
+            <div class="suggestion-grid">
+              <button
+                class="suggestion-card"
+                data-query="Tóm tắt mục tiêu, phương pháp và kết quả chính của tài liệu."
+              >
+                <div class="suggestion-card-icon">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <rect
+                      x="3"
+                      y="4"
+                      width="18"
+                      height="18"
+                      rx="2"
+                      ry="2"
+                    ></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                </div>
+                <div class="suggestion-card-content">
+                  <span class="suggestion-title">Tóm tắt tài liệu</span>
+                  <span class="suggestion-sub"
+                    >Mục tiêu, phương pháp và kết quả chính</span
+                  >
+                </div>
+              </button>
+
+              <button
+                class="suggestion-card"
+                data-query="So sánh phương pháp và kết quả giữa các tài liệu được chọn."
+              >
+                <div class="suggestion-card-icon">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                    <path
+                      d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
+                    ></path>
+                  </svg>
+                </div>
+                <div class="suggestion-card-content">
+                  <span class="suggestion-title">So sánh nghiên cứu</span>
+                  <span class="suggestion-sub"
+                    >Đối chiếu phương pháp và kết quả giữa các nguồn</span
+                  >
+                </div>
+              </button>
+
+              <button
+                class="suggestion-card"
+                data-query="Kiểm chứng các số liệu và kết luận chính trong tài liệu được chọn."
+              >
+                <div class="suggestion-card-icon">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                  </svg>
+                </div>
+                <div class="suggestion-card-content">
+                  <span class="suggestion-title">Kiểm chứng kết luận</span>
+                  <span class="suggestion-sub"
+                    >Đối soát số liệu và nhận định với bằng chứng</span
+                  >
+                </div>
+              </button>
+
+              <button
+                class="suggestion-card"
+                data-query="Phân tích hạn chế và hướng nghiên cứu tiếp từ các tài liệu được chọn."
+              >
+                <div class="suggestion-card-icon">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <line x1="18" y1="20" x2="18" y2="10"></line>
+                    <line x1="12" y1="20" x2="12" y2="4"></line>
+                    <line x1="6" y1="20" x2="6" y2="14"></line>
+                  </svg>
+                </div>
+                <div class="suggestion-card-content">
+                  <span class="suggestion-title"
+                    >Hạn chế và hướng tiếp theo</span
+                  >
+                  <span class="suggestion-sub"
+                    >Phân tích giới hạn và hướng nghiên cứu có căn cứ</span
+                  >
+                </div>
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="upload-steps" aria-label="Các bước xử lý tài liệu">
-        <span id="upload-step-transfer">Truyền tệp</span>
-        <span id="upload-step-extract">Đọc tài liệu</span>
-        <span id="upload-step-chunk">Chia đoạn</span>
-        <span id="upload-step-index">Lập chỉ mục</span>
-      </div>
-    </section>
-    <div
-      id="toast-region"
-      class="toast-region"
-      role="status"
-      aria-live="polite"
-    ></div>
+
+        <!-- 3. MINIMALIST CAPSULE INPUT DOCK (Tiêu chí 1, 2, 3, 4, 5) -->
+        <div class="input-dock-wrapper">
+          <p id="workspaceStatus" role="status" hidden></p>
+          <div class="input-dock-mono">
+            <textarea
+              id="promptInput"
+              maxlength="2000"
+              aria-label="Câu hỏi nghiên cứu"
+              class="omni-textarea-mono"
+              placeholder="Nhập câu hỏi hoặc gõ / để mở lệnh nhanh"
+              rows="1"
+            ></textarea>
+
+            <div class="input-actions">
+              <!-- Phía dưới bên trái: Nút (+) và Pill chọn Model -->
+              <div class="input-actions-left">
+                <!-- Nút Dấu Cộng (+) Tinh Gọn (Tiêu chí 3) -->
+                <button
+                  class="action-pill-btn icon-only"
+                  id="uploadPdfBtn"
+                  title="Tải tệp PDF lên kho"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                  >
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                  </svg>
+                </button>
+                <input
+                  type="file"
+                  id="pdfFileInput"
+                  accept=".pdf,.txt,.md"
+                  style="display: none"
+                />
+
+                <!-- Pill Chọn Model Capsule Thuần Trắng Đen (Đã bỏ chấm xanh) -->
+                <div class="model-selector-wrapper">
+                  <button
+                    class="action-pill-btn"
+                    id="modelDropdownBtn"
+                    aria-expanded="false"
+                    aria-controls="agentMatrixPopover"
+                    title="Cấu hình mô hình cho từng Agent &amp; GPU Kaggle"
+                  >
+                    <span class="model-btn-text" id="activeModelLabel"
+                      >Demo trích xuất</span
+                    >
+                    <span
+                      class="gemini-pill-badge"
+                      id="geminiPillBadge"
+                      style="display: none"
+                      >0 / 1.500</span
+                    >
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                    >
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+
+                  <!-- Bảng Glassmorphism Popover Mở Ngược Lên (Tiêu chí 6, 7, 8, 9) -->
+                  <div
+                    class="agent-matrix-popover bottom-up"
+                    id="agentMatrixPopover"
+                  >
+                    <div class="popover-header">
+                      <div class="popover-header-title">
+                        <span class="popover-title"
+                          >Cấu Hình Mô Hình Agent</span
+                        >
+                        <span class="popover-subtitle"
+                          >Chọn model cho từng agent</span
+                        >
+                      </div>
+                      <div class="popover-header-actions">
+                        <button
+                          class="auto-select-best-btn"
+                          id="autoSelectBestBtn"
+                          title="Khôi phục cấu hình do máy chủ chọn"
+                        >
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.5"
+                          >
+                            <polygon
+                              points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+                            ></polygon>
+                          </svg>
+                          <span>Mặc định máy chủ</span>
+                        </button>
+                        <button
+                          class="popover-close-btn"
+                          id="closePopoverBtn"
+                          title="Đóng"
+                        >
+                          x
+                        </button>
+                      </div>
+                    </div>
+
+                    <section
+                      class="quick-select-box"
+                      aria-labelledby="modelPresetsTitle"
+                    >
+                      <div class="quick-select-header">
+                        <span class="quick-select-title" id="modelPresetsTitle"
+                          >Áp dụng cho cả 5 agent</span
+                        >
+                        <span class="quick-active-pill" id="quickActivePill"
+                          >Mặc định</span
+                        >
+                      </div>
+                      <div class="quick-btn-group">
+                        <button
+                          type="button"
+                          class="quick-select-btn"
+                          data-mode="cpu_min"
+                          title="Demo trích xuất, không cần API key"
+                        >
+                          CPU Min
+                        </button>
+                        <button
+                          type="button"
+                          class="quick-select-btn"
+                          data-mode="cpu_max"
+                        >
+                          CPU Max
+                        </button>
+                        <button
+                          type="button"
+                          class="quick-select-btn"
+                          data-mode="gemini"
+                        >
+                          <span class="quick-btn-name">Cloud API</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="quick-select-btn"
+                          data-mode="gpu"
+                        >
+                          GPU Worker
+                        </button>
+                        <button
+                          type="button"
+                          class="quick-select-btn"
+                          data-mode="hybrid"
+                        >
+                          Hybrid
+                        </button>
+                      </div>
+                    </section>
+
+                    <section
+                      class="kaggle-config-box model-connections"
+                      aria-labelledby="modelSettingsTitle"
+                    >
+                      <div class="kaggle-label-row">
+                        <h3 class="config-label" id="modelSettingsTitle">
+                          Kết nối mô hình
+                        </h3>
+                        <button
+                          type="button"
+                          class="config-help"
+                          id="closeModelSettings"
+                          hidden
+                        >
+                          Thu gọn
+                        </button>
+                      </div>
+                      <div
+                        class="model-settings-targets"
+                        role="group"
+                        aria-label="Cấu hình kết nối"
+                      >
+                        <button
+                          type="button"
+                          data-config-target="api"
+                          aria-controls="modelSettingsPanel"
+                          aria-expanded="false"
+                        >
+                          Cloud API <small id="apiTargetStatus">Đang tải</small>
+                        </button>
+                        <button
+                          type="button"
+                          data-config-target="cpu"
+                          aria-controls="modelSettingsPanel"
+                          aria-expanded="false"
+                        >
+                          CPU <small id="cpuTargetStatus">Đang tải</small>
+                        </button>
+                        <button
+                          type="button"
+                          data-config-target="gpu"
+                          aria-controls="modelSettingsPanel"
+                          aria-expanded="false"
+                        >
+                          GPU Worker
+                          <small id="gpuTargetStatus">Đang tải</small>
+                        </button>
+                        <button
+                          type="button"
+                          data-config-target="embedding"
+                          aria-controls="modelSettingsPanel"
+                          aria-expanded="false"
+                        >
+                          GPU embedding <small>Kaggle · tìm tài liệu</small>
+                        </button>
+                      </div>
+                      <div id="modelSettingsPanel" hidden>
+                        <p id="modelSettingsStatus" role="status" hidden></p>
+                        <div id="modelSettingsForm"></div>
+                        <section
+                          id="workspaceGpuSettings"
+                          aria-label="GPU embedding từ Kaggle"
+                          hidden
+                        >
+                          <p id="gpu-active-badge" class="gpu-badge">
+                            Chưa bật
+                          </p>
+                          <form
+                            id="gpu-config-form"
+                            class="target-form"
+                            autocomplete="off"
+                          >
+                            <fieldset id="gpu-fields" disabled>
+                              <label
+                                >Họ model embedding
+                                <select id="gpu-family">
+                                  <option value="e5">Multilingual E5</option>
+                                  <option value="qwen3-0.6b">
+                                    Qwen3 Embedding 0.6B
+                                  </option>
+                                  <option value="qwen3-4b">
+                                    Qwen3 Embedding 4B
+                                  </option>
+                                </select>
+                              </label>
+                              <label
+                                >URL từ notebook
+                                <input
+                                  id="gpu-url"
+                                  type="url"
+                                  placeholder="https://…trycloudflare.com"
+                                  required
+                                  maxlength="2048"
+                                  spellcheck="false"
+                                />
+                              </label>
+                              <label
+                                >Key truy cập GPU
+                                <input
+                                  id="gpu-key"
+                                  type="password"
+                                  autocomplete="new-password"
+                                  aria-describedby="gpu-key-note"
+                                  maxlength="4096"
+                                  spellcheck="false"
+                                />
+                                <small id="gpu-key-note"></small>
+                              </label>
+                              <label
+                                >Model ID (tùy chọn)
+                                <input
+                                  id="gpu-model"
+                                  type="text"
+                                  placeholder="Tự nhận diện nếu để trống"
+                                  maxlength="160"
+                                  spellcheck="false"
+                                />
+                              </label>
+                              <details>
+                                <summary>Tùy chọn embedding</summary>
+                                <label
+                                  >Tokenizer
+                                  <input
+                                    id="gpu-tokenizer"
+                                    type="text"
+                                    value="intfloat/multilingual-e5-base"
+                                    maxlength="300"
+                                    required
+                                    spellcheck="false"
+                                  />
+                                </label>
+                                <label
+                                  >Số đoạn mỗi lần gửi
+                                  <input
+                                    id="gpu-batch"
+                                    type="number"
+                                    min="1"
+                                    max="32"
+                                    value="16"
+                                    required
+                                  />
+                                </label>
+                              </details>
+                              <div class="target-actions">
+                                <button id="gpu-test" type="button">
+                                  Kiểm tra kết nối
+                                </button>
+                                <button
+                                  id="gpu-save"
+                                  class="primary-button"
+                                  type="submit"
+                                >
+                                  Lưu và áp dụng
+                                </button>
+                                <button id="gpu-restore" type="button" disabled>
+                                  Khôi phục cấu hình gốc
+                                </button>
+                              </div>
+                            </fieldset>
+                          </form>
+                          <p id="gpu-feedback" role="status"></p>
+                          <div id="gpu-index-panel" hidden>
+                            <p id="gpu-index-note"></p>
+                            <button id="gpu-rebuild" type="button">
+                              Cập nhật chỉ mục tài liệu
+                            </button>
+                          </div>
+                        </section>
+                      </div>
+                    </section>
+
+                    <div class="matrix-divider"></div>
+
+                    <!-- Tùy chỉnh Vòng Lặp Tự Phản Biện & Đào Sâu (Autonomous Loops) -->
+                    <div class="reflection-loops-box">
+                      <div class="loops-label-row">
+                        <label class="config-label">Vòng phản biện</label>
+                        <span
+                          class="loops-status-val"
+                          id="reflectionLoopsStatus"
+                          >2 vòng</span
+                        >
+                      </div>
+                      <div class="loops-btn-group">
+                        <button
+                          type="button"
+                          class="loop-select-btn"
+                          data-loops="1"
+                          title="1 vòng lặp: Tốc độ tức thì, phù hợp tra cứu nhanh"
+                        >
+                          1x Nhanh
+                        </button>
+                        <button
+                          type="button"
+                          class="loop-select-btn active"
+                          data-loops="2"
+                          title="2 vòng lặp: Tự phản biện và truy hồi bù khuyết cân bằng"
+                        >
+                          2x Cân Bằng
+                        </button>
+                      </div>
+                      <div class="config-help">
+                        Số vòng Agent tự động rà soát, phát hiện lỗ hổng tri
+                        thức và tìm kiếm bổ sung trước khi kết luận.
+                      </div>
+                    </div>
+
+                    <div class="matrix-divider"></div>
+
+                    <!-- Ma Trận 5 Agent -->
+                    <div class="agent-matrix-list">
+                      <div class="agent-matrix-row">
+                        <div class="agent-meta">
+                          <div class="agent-name-row">
+                            <span class="agent-name">1. Retrieval Agent</span>
+                            <span class="agent-badge">Tìm kiếm</span>
+                          </div>
+                          <span class="agent-role"
+                            >Truy hồi tài liệu khoa học</span
+                          >
+                        </div>
+                        <select
+                          class="agent-model-select"
+                          data-agent="retrieval"
+                          aria-label="Model cho Retrieval Agent"
+                        >
+                          <option value="default">Mặc định máy chủ</option>
+                        </select>
+                      </div>
+
+                      <div class="agent-matrix-row">
+                        <div class="agent-meta">
+                          <div class="agent-name-row">
+                            <span class="agent-name">2. Reader Agent</span>
+                            <span class="agent-badge">Đọc hiểu</span>
+                          </div>
+                          <span class="agent-role"
+                            >Bóc tách cấu trúc &amp; bảng biểu</span
+                          >
+                        </div>
+                        <select
+                          class="agent-model-select"
+                          data-agent="reader"
+                          aria-label="Model cho Reader Agent"
+                        >
+                          <option value="default">Mặc định máy chủ</option>
+                        </select>
+                      </div>
+
+                      <div class="agent-matrix-row">
+                        <div class="agent-meta">
+                          <div class="agent-name-row">
+                            <span class="agent-name">3. Summarizer Agent</span>
+                            <span class="agent-badge">Tổng hợp</span>
+                          </div>
+                          <span class="agent-role"
+                            >Đúc kết luận điểm chuyên sâu</span
+                          >
+                        </div>
+                        <select
+                          class="agent-model-select"
+                          data-agent="summarizer"
+                          aria-label="Model cho Summarizer Agent"
+                        >
+                          <option value="default">Mặc định máy chủ</option>
+                        </select>
+                      </div>
+
+                      <div class="agent-matrix-row">
+                        <div class="agent-meta">
+                          <div class="agent-name-row">
+                            <span class="agent-name"
+                              >4. Fact-Checker Agent</span
+                            >
+                            <span class="agent-badge">Đối soát</span>
+                          </div>
+                          <span class="agent-role"
+                            >Kiểm chứng NLI &amp; chống ảo giác</span
+                          >
+                        </div>
+                        <select
+                          class="agent-model-select"
+                          data-agent="fact_checker"
+                          aria-label="Model cho Fact Checker Agent"
+                        >
+                          <option value="default">Mặc định máy chủ</option>
+                        </select>
+                      </div>
+
+                      <div class="agent-matrix-row">
+                        <div class="agent-meta">
+                          <div class="agent-name-row">
+                            <span class="agent-name">5. Writer Agent</span>
+                            <span class="agent-badge">Biên soạn</span>
+                          </div>
+                          <span class="agent-role"
+                            >Biên tập báo cáo học thuật</span
+                          >
+                        </div>
+                        <select
+                          class="agent-model-select"
+                          data-agent="writer"
+                          aria-label="Model cho Writer Agent"
+                        >
+                          <option value="default">Mặc định máy chủ</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="input-actions-right">
+                <button
+                  class="send-btn-circle"
+                  id="sendBtn"
+                  title="Chưa có nội dung"
+                  disabled
+                >
+                  <svg
+                    class="btn-icon-arrow"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <line x1="12" y1="19" x2="12" y2="5"></line>
+                    <polyline points="5 12 12 5 19 12"></polyline>
+                  </svg>
+                  <span class="btn-icon-stop"></span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- 4. RIGHT SIDECAR: EVIDENCE LEDGER & PDF VIEWER -->
+      <aside class="sidecar-panel collapsed" id="sidecar">
+        <div class="sidecar-header">
+          <div class="sidecar-title-box">
+            <div class="sidecar-title" id="sidecarDocTitle">
+              Tài liệu và trích dẫn
+            </div>
+            <div class="sidecar-sub" id="evidenceCountBadge">
+              Chưa có trích dẫn
+            </div>
+          </div>
+          <div class="sidecar-header-actions">
+            <a
+              class="icon-btn-ghost"
+              id="downloadDocBtn"
+              href="#"
+              download
+              title="Tải tài liệu gốc"
+              aria-label="Tải tài liệu gốc"
+              hidden
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </a>
+            <button
+              class="icon-btn-ghost"
+              id="closeSidecarBtn"
+              title="Đóng bảng xem bài báo (Esc)"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="sidecar-tabs">
+          <button class="tab-btn active" data-tab="pdfViewerTab" id="tabPdfBtn">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right: 4px; vertical-align: -2px"
+            >
+              <path
+                d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+              ></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+            <span id="tabPdfLabel">Tài liệu gốc</span>
+          </button>
+          <button class="tab-btn" data-tab="reportViewTab" id="tabReportBtn">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right: 4px; vertical-align: -2px"
+            >
+              <path
+                d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+              ></path>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
+            Báo cáo
+          </button>
+          <button class="tab-btn" data-tab="evidenceTab" id="tabEvidenceBtn">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right: 4px; vertical-align: -2px"
+            >
+              <polyline points="9 11 12 14 22 4"></polyline>
+              <path
+                d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
+              ></path>
+            </svg>
+            Trích dẫn đối soát
+          </button>
+        </div>
+
+        <div class="tab-pane active" id="pdfViewerTab">
+          <section class="source-toolbar" aria-label="Điều khiển tài liệu">
+            <label id="sourcePickerLabel" hidden>
+              <span>Tài liệu</span>
+              <select id="sourceDocumentPicker"></select>
+            </label>
+            <div class="source-pagination" id="sourcePagination" hidden>
+              <button
+                type="button"
+                id="pdfPrevPageBtn"
+                aria-label="Trang trước"
+              >
+                ‹
+              </button>
+              <label>
+                <span>Trang</span>
+                <input
+                  id="sourcePageInput"
+                  inputmode="numeric"
+                  type="number"
+                  min="1"
+                  value="1"
+                />
+              </label>
+              <span id="pdfPageCount"></span>
+              <button type="button" id="pdfNextPageBtn" aria-label="Trang sau">
+                ›
+              </button>
+            </div>
+            <div class="source-zoom" id="sourceZoom" hidden>
+              <button type="button" id="pdfZoomOutBtn" aria-label="Thu nhỏ">
+                −
+              </button>
+              <button
+                type="button"
+                id="pdfZoomResetBtn"
+                aria-label="Vừa chiều rộng"
+              >
+                Vừa khung
+              </button>
+              <button type="button" id="pdfZoomInBtn" aria-label="Phóng to">
+                +
+              </button>
+            </div>
+          </section>
+          <p id="sourceStatus" role="status" aria-live="polite">
+            Chọn tên tài liệu trong kho hoặc mở một trích dẫn để đọc nguồn tại
+            đây.
+          </p>
+          <details id="sourceContext" class="workspace-source-context" hidden>
+            <summary id="sourceContextTitle">Đoạn trích dẫn</summary>
+            <blockquote id="sourceContextQuote"></blockquote>
+          </details>
+          <div
+            id="sourceViewport"
+            class="source-viewport"
+            role="region"
+            aria-label="Nội dung tài liệu gốc"
+            tabindex="0"
+            hidden
+          >
+            <div id="sourcePdfPages" class="source-pdf-pages" hidden></div>
+            <div class="doc-markdown-viewer" id="docMdViewer" hidden></div>
+          </div>
+        </div>
+
+        <div class="tab-pane" id="reportViewTab">
+          <div class="sidecar-report-pane" id="sidecarReportPane">
+            <div class="empty-sidecar">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                class="empty-icon"
+              >
+                <path
+                  d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                ></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+              </svg>
+              <p>Báo cáo sẽ xuất hiện sau khi bạn gửi câu hỏi.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="tab-pane" id="evidenceTab">
+          <div class="evidence-list" id="sidecarEvidenceList">
+            <div class="empty-sidecar">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                class="empty-icon"
+              >
+                <path
+                  d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                ></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+              </svg>
+              <p>
+                Trích dẫn của câu trả lời sẽ hiện ở đây. Chọn một trích dẫn để
+                xem vị trí trong tài liệu.
+              </p>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <script src="/assets/workspace-background.js?v=20261107_v1"></script>
+    <script
+      type="module"
+      src="/assets/workspace.js?v=continuous-pdf-1"
+    ></script>
   </body>
 </html>

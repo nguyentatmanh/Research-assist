@@ -11,6 +11,12 @@
 .paper-discovery form {
   margin-block-start: 1rem;
 }
+.paper-discovery select {
+  display: block;
+  max-width: 100%;
+  margin-block: 0.3rem 0.75rem;
+  padding: 0.5rem;
+}
 .paper-query-row {
   display: flex;
   flex-wrap: wrap;

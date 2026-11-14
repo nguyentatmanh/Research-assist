@@ -58,7 +58,7 @@ try {
   });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(backend.base);
+  await page.goto(backend.base + "/desk");
   await page.waitForFunction(() =>
     document
       .querySelector("#connection-label")
@@ -74,11 +74,20 @@ try {
     () => !document.querySelector("#gpu-fields").disabled,
   );
   await page.selectOption("#gpu-family", "qwen3-4b");
-  assert.equal(await page.inputValue("#gpu-tokenizer"), "Qwen/Qwen3-Embedding-4B");
+  assert.equal(
+    await page.inputValue("#gpu-tokenizer"),
+    "Qwen/Qwen3-Embedding-4B",
+  );
   await page.selectOption("#gpu-family", "qwen3-0.6b");
-  assert.equal(await page.inputValue("#gpu-tokenizer"), "Qwen/Qwen3-Embedding-0.6B");
+  assert.equal(
+    await page.inputValue("#gpu-tokenizer"),
+    "Qwen/Qwen3-Embedding-0.6B",
+  );
   await page.selectOption("#gpu-family", "e5");
-  assert.equal(await page.inputValue("#gpu-tokenizer"), "intfloat/multilingual-e5-base");
+  assert.equal(
+    await page.inputValue("#gpu-tokenizer"),
+    "intfloat/multilingual-e5-base",
+  );
   checks++;
   await page.fill("#gpu-url", url);
   await page.fill("#gpu-key", key);
@@ -180,6 +189,39 @@ try {
     ).active,
     false,
   );
+  await page.goto(backend.base);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.fill("#promptInput", "Câu hỏi đang soạn");
+  await page.click("#modelDropdownBtn");
+  await page.click('[data-config-target="embedding"]');
+  await page.waitForFunction(
+    () => !document.querySelector("#gpu-fields").disabled,
+  );
+  assert.equal(new URL(page.url()).pathname, "/");
+  await page.fill("#gpu-url", url);
+  await page.fill("#gpu-key", key);
+  await page.click("#gpu-save");
+  await page.waitForFunction(() =>
+    document
+      .querySelector("#gpu-feedback")
+      .textContent.includes("Đã lưu và áp dụng"),
+  );
+  assert.equal(await page.inputValue("#gpu-key"), "");
+  await page.click("#closeModelSettings");
+  assert.equal(await page.inputValue("#promptInput"), "Câu hỏi đang soạn");
+  await page.click('[data-config-target="embedding"]');
+  await page.waitForFunction(
+    () => !document.querySelector("#gpu-fields").disabled,
+  );
+  assert.equal(await page.inputValue("#gpu-url"), url + "/v1");
+  assert.equal(await page.inputValue("#gpu-key"), "");
+  await page.click("#gpu-restore");
+  await page.waitForFunction(() =>
+    document
+      .querySelector("#gpu-feedback")
+      .textContent.includes("cấu hình embedding gốc"),
+  );
+  checks++;
   assert.deepEqual(errors, []);
   checks++;
   console.log(

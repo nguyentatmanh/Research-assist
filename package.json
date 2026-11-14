@@ -11,7 +11,11 @@
     "test:ui:papers": "node tests/ui_paper_search.spec.mjs",
     "test:ui:design": "node tests/ui_design.spec.mjs",
     "test:ui:fonts": "node tests/ui_fonts.spec.mjs",
-    "test:ui:upload": "node tests/ui_upload.spec.mjs"
+    "test:ui:upload": "node tests/ui_upload.spec.mjs",
+    "test:workspace:dom": "node tests/workspace-dom.spec.mjs",
+    "test:desk:dom": "node tests/desk-dom.spec.mjs",
+    "test:desk": "node tests/desk.spec.mjs",
+    "test:workspace": "node tests/workspace.spec.mjs"
   },
   "devDependencies": {
     "jsdom": "^26.1.0",

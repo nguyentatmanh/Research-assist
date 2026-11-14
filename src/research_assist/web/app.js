@@ -1,10 +1,31 @@
+import {
+  configureWorkspace,
+  initializeWorkspace,
+  executionSelection,
+  refreshDiagnostics,
+  selectPreset,
+} from "./fusion_workspace.js?v=inline-model-1";
+import {
+  initializeCommands,
+  expandQuestion,
+  readCommand,
+} from "./commands.js?v=slash-menu-1";
 import { api, uploadDocument } from "./api.js";
 import { initializePaperSearch } from "./paper_search.js";
 import { $, $$, el, icon, dateLabel, statuses, toast } from "./dom.js";
-import { renderEvents, renderResult, selectTab, copyReport } from "./report.js";
+import {
+  renderEvents,
+  renderResult,
+  selectTab,
+  copyReport,
+} from "./report.js?v=verified-report-1";
 import { renderBenchmark, renderRoutes } from "./lab.js";
 import { recordStatusLabel } from "./run_status.js";
-import { initializeGpuSettings, loadGpuSettings } from "./gpu_settings.js";
+import {
+  clearGpuKey,
+  initializeGpuSettings,
+  loadGpuSettings,
+} from "./gpu_settings.js?v=kaggle-chat-1";
 
 const state = {
   documents: [],
@@ -31,10 +52,12 @@ async function initialize() {
     state.config = config;
     state.documents = documents.documents;
     renderConfig();
+    $("#orchestration-mode").value = config.orchestration_mode || "autonomous";
     $("#workflow-profile").value = config.workflow_profile || "balanced";
     renderDocuments();
     $("#connection-label").textContent = "Backend đã kết nối";
     const saved = localStorage.getItem("research-active-run");
+    if (["#settings", "#settings-api"].includes(window.location.hash)) return;
     if (saved) {
       try {
         await openRun(saved);
@@ -77,6 +100,7 @@ function renderConfig() {
     summary.append(group);
   }
   renderRoutes(config.agent_routes || []);
+  configureWorkspace(config);
 }
 
 function renderDocuments() {
@@ -287,9 +311,17 @@ function setWorking(value) {
 
 async function startResearch() {
   if (state.working) return;
-  const question = $("#question").value.trim();
-  if (question.length < 8) {
-    toast("Câu hỏi cần ít nhất 8 ký tự.", true);
+  const value = $("#question").value.trim();
+  const parsed = readCommand(value);
+  if (commandMenu.runAction(parsed)) return;
+  if (parsed && !parsed.command) {
+    toast("Không tìm thấy lệnh. Gõ / để xem danh sách.", true);
+    return;
+  }
+  commandMenu.close();
+  const question = expandQuestion(value);
+  if (question.length < 8 || question.length > 2000) {
+    toast("Câu hỏi sau mở rộng lệnh cần từ 8 đến 2000 ký tự.", true);
     $("#question").focus();
     return;
   }
@@ -323,6 +355,9 @@ async function startResearch() {
       method: "POST",
       body: {
         question,
+        ...(value !== question && { display_question: value }),
+        agent_targets: executionSelection(),
+        orchestration_mode: $("#orchestration-mode").value,
         requirements: $("#requirements")
           .value.split(/\r?\n/)
           .map((s) => s.trim())
@@ -372,7 +407,7 @@ async function pollRun(runId) {
     if (["completed", "failed", "cancelled"].includes(record.status)) {
       setWorking(false);
       if (record.result) {
-        renderResult(record.result);
+        renderResult(record.result, record.request.display_question);
       } else {
         toast(
           record.error || statuses[record.status],
@@ -394,9 +429,10 @@ async function openRun(runId) {
   const record = await api(`/runs/${runId}`);
   switchView("research");
   state.runId = runId;
-  $("#question").value = record.request.question;
+  $("#question").value =
+    record.request.display_question || record.request.question;
   $("#requirements").value = (record.request.requirements || []).join("\n");
-  $("#question-count").textContent = `${record.request.question.length} / 2000`;
+  $("#question-count").textContent = `${$("#question").value.length} / 2000`;
   $("#language").value = record.request.language;
   $("#report-style").value = record.request.style;
   $("#retrieval-mode").value = record.request.retrieval_mode;
@@ -411,7 +447,7 @@ async function openRun(runId) {
   renderDocuments();
   localStorage.setItem("research-active-run", runId);
   if (record.result) {
-    renderResult(record.result);
+    renderResult(record.result, record.request.display_question);
     setWorking(false);
   } else if (["queued", "running"].includes(record.status))
     await pollRun(runId);
@@ -840,6 +876,7 @@ function switchView(name) {
     library: "Kho tài liệu",
     history: "Lịch sử phiên",
     experiments: "Thực nghiệm",
+    settings: "Cài đặt",
   }[name];
   const menuWasOpen = $("#sidebar").classList.contains("open");
   setSidebarOpen(false);
@@ -894,6 +931,7 @@ $$(".main-nav .nav-item").forEach((button) =>
   button.addEventListener("click", () => {
     switchView(button.dataset.view);
     if (button.dataset.view === "history") showHistory();
+    if (button.dataset.view === "settings") refreshDiagnostics();
     if (button.dataset.view === "library")
       refreshDocuments().catch((error) => toast(error.message, true));
   }),
@@ -939,7 +977,11 @@ $("#question").addEventListener("input", (event) => {
   updateResearchSteps();
 });
 $("#question").addEventListener("keydown", (event) => {
-  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+  if (
+    !event.isComposing &&
+    (event.ctrlKey || event.metaKey) &&
+    event.key === "Enter"
+  ) {
     event.preventDefault();
     startResearch();
   }
@@ -971,6 +1013,7 @@ $("#advanced-toggle").addEventListener("click", () => {
     }
   }),
 );
+$("#settings-dialog").addEventListener("close", clearGpuKey);
 initializeGpuSettings(
   async () => {
     state.config = await api("/config");
@@ -1118,6 +1161,8 @@ $("#logout-button").addEventListener("click", async () => {
     toast(error.message, true);
   }
 });
+initializeWorkspace(refreshDocuments);
+const commandMenu = initializeCommands(selectPreset);
 initialize();
 
 $("#architecture-button").addEventListener("click", async () => {
@@ -1178,7 +1223,7 @@ function renderScopePicker() {
 }
 function activityRecord(record) {
   $("#activity-run").textContent =
-    `${record.request.question} · ${recordStatusLabel(record)}`;
+    `${record.request.display_question || record.request.question} · ${recordStatusLabel(record)}`;
   $("#export-trace").hidden = false;
   $("#export-trace").href = `/api/runs/${record.id}/trace`;
   const documents = record.scope_documents || [];
@@ -1233,3 +1278,7 @@ $("#rebuild-button").addEventListener("click", async (e) => {
     button.disabled = false;
   }
 });
+
+if (["#settings", "#settings-api"].includes(window.location.hash)) {
+  $('.main-nav [data-view="settings"]').click();
+}

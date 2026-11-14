@@ -4,6 +4,7 @@ import { $, el } from "./dom.js";
 export function initializePaperSearch(refreshDocuments) {
   const form = $("#paper-search-form");
   const input = $("#paper-query");
+  const source = $("#paper-source");
   const results = $("#paper-results");
   const status = $("#paper-status");
   let busy = false;
@@ -16,22 +17,35 @@ export function initializePaperSearch(refreshDocuments) {
       button.disabled = busy || button.dataset.imported === "true";
     }
     input.readOnly = busy;
+    source.disabled = busy;
   }
+  source.addEventListener("change", () => {
+    results.replaceChildren();
+    status.textContent = "";
+  });
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (busy) return;
     results.replaceChildren();
-    status.textContent = "Đang tìm trên arXiv…";
+    const selectedSource = source.value;
+    status.textContent =
+      "Đang tìm trên " +
+      (selectedSource === "crossref" ? "Crossref" : "arXiv") +
+      "…";
     setBusy(true);
     try {
       const papers = await api("/papers/search", {
         method: "POST",
-        body: { query: input.value.trim() },
+        body: { query: input.value.trim(), source: selectedSource },
       });
       for (const paper of papers) {
         const row = el("li");
         const title = el("a", "", paper.title);
-        title.href = "https://arxiv.org/abs/" + paper.paper_id;
+        const isCrossref = paper.source === "crossref";
+        title.href = isCrossref
+          ? "https://doi.org/" + encodeURIComponent(paper.doi)
+          : "https://arxiv.org/abs/" +
+            encodeURIComponent(paper.paper_id).replace(/%2F/g, "/");
         title.target = "_blank";
         title.rel = "noopener noreferrer";
         const add = el("button", "secondary-button", "Thêm vào kho");
@@ -67,8 +81,18 @@ export function initializePaperSearch(refreshDocuments) {
               .filter(Boolean)
               .join(" · "),
           ),
-          add,
         );
+        if (isCrossref || paper.import_available === false) {
+          row.append(
+            el(
+              "small",
+              "",
+              "Mở DOI để xem bài; tải PDF và thêm vào kho để dùng làm bằng chứng.",
+            ),
+          );
+        } else {
+          row.append(add);
+        }
         results.append(row);
       }
       status.textContent = papers.length

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Research Assist · Studio</title>
+    <link rel="icon" href="/assets/favicon.svg" />
+    <link rel="stylesheet" href="/assets/fonts.css" />
+    <link rel="stylesheet" href="/assets/studio.css" />
+    <script type="module" src="/assets/studio.js?v=verified-report-1"></script>
+  </head>
+  <body>
+    <a class="skip" href="#question">Đến câu hỏi nghiên cứu</a>
+    <header class="topbar">
+      <a class="brand" href="/studio"
+        ><span class="brand-icon" aria-hidden="true">R<span>A</span></span
+        ><span
+          >Research <span class="muted">Assist</span
+          ><small>AN EVIDENCE-FIRST WORKSPACE</small></span
+        ></a
+      >
+      <nav>
+        <a href="/studio" aria-current="page">Nghiên cứu</a
+        ><a href="/">Workspace nâng cao ↗</a><a href="/docs">API ↗</a>
+      </nav>
+      <div class="connection">
+        <i></i><span id="connection">Đang kết nối</span
+        ><button id="logout" class="quiet" hidden>Đăng xuất</button>
+      </div>
+    </header>
+    <main class="workspace">
+      <aside class="library panel">
+        <div class="eyebrow">01 / KNOWLEDGE BASE</div>
+        <div class="section-title">
+          <h2>Kho tài liệu</h2>
+          <span id="doc-count" class="badge">0</span>
+        </div>
+        <p class="muted small">Chọn nguồn để cố định phạm vi nghiên cứu.</p>
+        <label class="dropzone" id="dropzone"
+          ><span class="upload-icon">↥</span><strong>Thêm tài liệu</strong
+          ><span>PDF · DOCX · TXT · Markdown</span
+          ><input id="files" type="file" accept=".pdf,.docx,.txt,.md" multiple
+        /></label>
+        <div class="button-row">
+          <button id="seed" class="quiet">Nạp tài liệu mẫu</button
+          ><button id="select-all" class="quiet">Chọn tất cả</button>
+        </div>
+        <p id="upload-status" class="small" role="status"></p>
+        <div id="documents" class="document-list">
+          <p class="empty">Chưa có tài liệu.</p>
+        </div>
+        <details class="discovery">
+          <summary>Tìm bài báo · arXiv / Crossref</summary>
+          <form id="scout-form">
+            <label class="sr-only" for="scout-query">Từ khóa tìm bài báo</label
+            ><input
+              id="scout-query"
+              placeholder="vd. retrieval augmented generation"
+              minlength="3"
+              maxlength="300"
+              required
+            /><button class="secondary" id="scout-button">Tìm bài báo</button>
+          </form>
+          <p class="muted small">
+            Thông tin thư mục chưa phải bằng chứng toàn văn.
+          </p>
+          <div id="scout-results"></div>
+        </details>
+        <div class="section-title history-title">
+          <h3>Phiên gần đây</h3>
+          <button id="refresh" class="quiet" aria-label="Làm mới lịch sử">
+            ↻
+          </button>
+        </div>
+        <div id="history"></div>
+      </aside>
+      <section class="main-column">
+        <div class="hero">
+          <div class="eyebrow">RESEARCH, WITH A TRACE.</div>
+          <h1>Từ câu hỏi đến<br /><em>bằng chứng.</em></h1>
+          <p>
+            Nhóm agent cùng đọc, phản biện và tổng hợp tài liệu.<br />Mỗi kết
+            luận đều có nguồn để bạn kiểm tra.
+          </p>
+          <span class="hero-seal">5 SPECIALISTS<br />ONE RESEARCH TEAM</span>
+        </div>
+        <div id="demo-notice" class="notice" hidden>
+          Chế độ demo trích xuất — không gọi LLM. Kết quả dùng để kiểm tra
+          luồng, không dùng làm điểm chất lượng AI.
+        </div>
+        <form id="research-form" class="composer panel">
+          <label for="question">Bạn muốn nghiên cứu điều gì?</label
+          ><textarea
+            id="question"
+            minlength="8"
+            maxlength="2000"
+            rows="3"
+            required
+            placeholder="So sánh phương pháp, kết quả và hạn chế của các bài báo đã chọn..."
+          ></textarea>
+          <details>
+            <summary>Yêu cầu cụ thể & cấu hình</summary>
+            <label for="requirements">Các ý cần trả lời (mỗi dòng một ý)</label
+            ><textarea
+              id="requirements"
+              rows="2"
+              placeholder="Phương pháp được sử dụng&#10;Hạn chế của thực nghiệm"
+            ></textarea>
+            <div class="options">
+              <label
+                >Điều phối<select id="mode">
+                  <option value="autonomous">
+                    Autonomous · agent có công cụ
+                  </option>
+
+                  <option value="adaptive">
+                    Adaptive · phản hồi theo vòng
+                  </option>
+                  <option value="fixed">Fixed · baseline</option>
+                </select></label
+              ><label
+                >Ngôn ngữ<select id="language">
+                  <option value="vi">Tiếng Việt</option>
+                  <option value="en">English</option>
+                </select></label
+              ><label
+                >Truy hồi<select id="retrieval">
+                  <option value="hybrid">Hybrid (nếu có embedding)</option>
+                  <option value="lexical">BM25</option>
+                </select></label
+              >
+            </div>
+          </details>
+          <div class="composer-footer">
+            <span id="scope-label" class="small muted"
+              >Chọn tài liệu để bắt đầu</span
+            >
+            <div>
+              <button id="cancel" class="quiet danger" type="button" hidden>
+                Dừng phiên</button
+              ><button id="start" class="primary">
+                Bắt đầu nghiên cứu <span>↗</span>
+              </button>
+            </div>
+          </div>
+        </form>
+        <section
+          id="results"
+          class="results panel"
+          aria-label="Kết quả nghiên cứu"
+        >
+          <div class="result-toolbar">
+            <div class="tabs" role="tablist">
+              <button
+                id="report-tab"
+                data-tab="report"
+                class="active"
+                role="tab"
+                aria-selected="true"
+              >
+                Báo cáo</button
+              ><button data-tab="ledger" role="tab" aria-selected="false">
+                Kiểm chứng</button
+              ><button data-tab="trace" role="tab" aria-selected="false">
+                Hoạt động
+              </button>
+            </div>
+            <div class="export">
+              <button id="export-md" class="quiet" disabled>↓ MD</button
+              ><button id="export-json" class="quiet" disabled>↓ JSON</button
+              ><button id="print" class="quiet" disabled>PDF</button>
+            </div>
+          </div>
+          <div id="run-meta" class="run-meta"></div>
+          <div id="report-panel" class="tab-content">
+            <div class="start-state">
+              <span class="start-glyph">✳</span>
+              <h2>Một câu hỏi tốt là điểm khởi đầu.</h2>
+              <p>
+                Thêm tài liệu, chọn phạm vi và giao việc cho nhóm nghiên cứu.
+              </p>
+              <button id="example" class="example">
+                Thử: RAG sử dụng bằng chứng như thế nào? ↗
+              </button>
+            </div>
+          </div>
+          <div id="ledger-panel" class="tab-content" hidden></div>
+          <div id="trace-panel" class="tab-content" hidden></div>
+        </section>
+        <footer class="footnote">
+          Research Assist / Advanced Machine Learning Lab
+          <span>Kiểm chứng nguồn ≠ xác nhận chân lý.</span>
+        </footer>
+      </section>
+      <aside class="team panel">
+        <div class="eyebrow">02 / THE RESEARCH TEAM</div>
+        <h2>Cộng tác có kiểm chứng.</h2>
+        <p class="muted small">
+          Agent có vai trò, công cụ và phản hồi riêng. Scheduler giới hạn ngân
+          sách và điều phối phụ thuộc.
+        </p>
+        <div id="agents"></div>
+        <div class="team-divider"></div>
+        <div class="eyebrow">RUN SNAPSHOT</div>
+        <div id="metrics" class="metrics">
+          <div><strong>—</strong><span>Nhận định</span></div>
+          <div><strong>—</strong><span>Bằng chứng</span></div>
+          <div><strong>—</strong><span>Lượt model</span></div>
+          <div><strong>—</strong><span>Thời gian</span></div>
+        </div>
+        <div class="principle">
+          <span>↳</span>
+          <p>
+            Chưa đủ nguồn thì giữ lại khoảng trống. Không thêm nhận định để lấp
+            chỗ trống.
+          </p>
+        </div>
+        <div id="routes" class="route-info small muted"></div>
+      </aside>
+    </main>
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+    <dialog id="login-dialog">
+      <form id="login-form">
+        <div class="eyebrow">PRIVATE WORKSPACE</div>
+        <h2>Mở không gian nghiên cứu</h2>
+        <p>Nhập mã truy cập được tạo khi khởi động máy chủ.</p>
+        <label for="token">Mã truy cập</label
+        ><input
+          type="password"
+          id="token"
+          autocomplete="current-password"
+          required
+          maxlength="256"
+        /><button class="primary">Đăng nhập</button>
+        <p id="login-error" role="alert"></p>
+      </form>
+    </dialog>
+  </body>
+</html>

@@ -22,7 +22,7 @@ try {
     if (!request.url().startsWith(backend.base))
       externalRequests.push(request.url());
   });
-  await page.goto(backend.base);
+  await page.goto(backend.base + "/desk");
   await page.waitForFunction(() =>
     document
       .querySelector("#connection-label")
