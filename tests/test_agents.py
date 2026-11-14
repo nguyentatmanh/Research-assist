@@ -8,8 +8,11 @@ from research_assist.domain.models import (
     Claim,
     ClaimCheck,
     Evidence,
+    RawClaim,
+    Requirement,
     ResearchRequest,
     RetrievedChunk,
+    SynthesisOutput,
 )
 from research_assist.infrastructure.llm import DemoLanguageModel
 from tests.conftest import ScriptedLLM
@@ -74,6 +77,39 @@ async def test_synthesis_rejects_nonexistent_evidence(evidence: Evidence) -> Non
     )
     claims, _, warnings = await SummarizerAgent(llm).run("Explain RAG methods", [evidence], "en")
     assert len(claims) == 1 and warnings
+
+
+def test_synthesis_dedup_preserves_each_requirement_and_claim_kind(evidence):
+    text = "RAG uses retrieval and generation."
+    output = SynthesisOutput(
+        claims=[
+            RawClaim(text=text, evidence_ids=[evidence.id], requirement_ids=["r1"]),
+            RawClaim(text=text, evidence_ids=[evidence.id, evidence.id], requirement_ids=["r2"]),
+            RawClaim(
+                text=text,
+                evidence_ids=[evidence.id],
+                requirement_ids=["r2"],
+                kind="grounded_recommendation",
+            ),
+        ]
+    )
+    requirements = [Requirement(id=rid, text=rid) for rid in ["r1", "r2"]]
+    claims, _, warnings = SummarizerAgent(ScriptedLLM({})).validate_output(
+        output, [evidence], requirements
+    )
+    assert len(claims) == 2 and not warnings
+    assert claims[0].requirement_ids == ["r1", "r2"]
+    assert claims[0].evidence_ids == [evidence.id]
+    assert claims[0].id != claims[1].id
+    assert claims[0].kind == "source_finding" and claims[1].kind == "grounded_recommendation"
+
+
+def test_synthesis_rejects_ambiguous_ledger_identity(evidence):
+    output = SynthesisOutput(claims=[RawClaim(text=evidence.quote, evidence_ids=[evidence.id])])
+    claims, _, warnings = SummarizerAgent(ScriptedLLM({})).validate_output(
+        output, [evidence, evidence.model_copy(update={"quote": "A conflicting source text."})]
+    )
+    assert not claims and warnings
 
 
 @pytest.mark.parametrize(

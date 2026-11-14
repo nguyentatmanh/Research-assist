@@ -1,3 +1,5 @@
+from collections import Counter
+
 from research_assist.agents.policies.verification import numbers, validate_checks  # noqa: F401
 from research_assist.agents.prompts.fact_checker import INSTRUCTION
 from research_assist.domain.coordination import valid_requests
@@ -7,6 +9,7 @@ from research_assist.domain.models import (
     ClaimCheck,
     Evidence,
     FactCheckOutput,
+    FollowUpRequest,
     Requirement,
 )
 from research_assist.domain.ports import LanguageModel
@@ -66,11 +69,46 @@ class FactCheckerAgent:
                 ):
                     row.status = "unassessed"
                     row.explanation = "Nhận định chưa được gắn với đúng ý cần trả lời."
+        requests = valid_requests(output.requests, requirements, claims, evidence)
+        # A model may approve a claim that a deterministic guard subsequently rejects.
+        # Turn that concrete criticism into work for the existing bounded repair loop;
+        # never re-run a model here or turn a repair proposal into supported evidence.
+        claim_counts = Counter(c.id for c in claims)
+        original_counts = Counter(c.claim_id for c in output.checks)
+        approved = {c.claim_id for c in output.checks if c.verdict == "supported"}
+        by_id = {c.id: c for c in claims}
+        requirement_ids = {r.id for r in requirements}
+        for check in checks:
+            if (
+                check.verdict != "insufficient"
+                or check.claim_id not in approved
+                or original_counts[check.claim_id] != 1
+                or claim_counts[check.claim_id] != 1
+                or len(requests) >= 8
+                or any(check.claim_id in r.claim_ids for r in requests if r.action == "revise")
+            ):
+                continue
+            claim = by_id[check.claim_id]
+            related = [rid for rid in claim.requirement_ids if rid in requirement_ids]
+            if not related and len(requirements) == 1:
+                related = [requirements[0].id]
+            if related:
+                requests.append(
+                    FollowUpRequest(
+                        action="revise",
+                        requirement_ids=list(dict.fromkeys(related)),
+                        claim_ids=[claim.id],
+                        need=(
+                            "Revise or omit the claim using only its cited evidence. "
+                            + check.explanation
+                        )[:700],
+                    )
+                )
         return FactCheckOutput(
             checks=checks,
             coverage=coverage,
             gap_checks=output.gap_checks,
-            requests=valid_requests(output.requests, requirements, claims, evidence),
+            requests=requests,
         )
 
     def _extractive_checks(self, claims: list[Claim], evidence: list[Evidence]) -> FactCheckOutput:

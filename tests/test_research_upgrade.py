@@ -8,13 +8,27 @@ from fastapi.testclient import TestClient
 
 from research_assist.agents.policies.verification import validate_checks
 from research_assist.agents.reader import _missing_literal_anchor
+from research_assist.agents.writer import WriterAgent
 from research_assist.api.app import create_app
+from research_assist.application.citation_audit import audit_citations, verification_snapshot
+from research_assist.application.research_state import ResearchState
 from research_assist.bootstrap import build_container
 from research_assist.domain.errors import DocumentError, ProviderError
-from research_assist.domain.models import Claim, ClaimCheck, SourceRegion
+from research_assist.domain.models import (
+    Claim,
+    ClaimCheck,
+    EvidenceGap,
+    ResearchRequest,
+    SourceRegion,
+    SourceSection,
+)
+from research_assist.domain.provenance import evidence_source_hash
 from research_assist.domain.source_units import source_units
 from research_assist.experiments.system_benchmark import load_cases
 from research_assist.infrastructure.arxiv import ArxivLibrary
+from research_assist.infrastructure.crossref import CrossrefLibrary
+from research_assist.infrastructure.llm import DemoLanguageModel
+from research_assist.infrastructure.sections import split_headings
 from tests.test_autonomous import AutonomousProvider, run_autonomous
 
 
@@ -216,3 +230,148 @@ async def test_arxiv_rejects_oversize_pdf_and_external_redirect():
     ) as client:
         with pytest.raises(ProviderError):
             await ArxivLibrary(client).pdf("1706.03762v1", 128)
+
+
+def test_crossref_discovery_preserves_doi_date_precision_and_corpus(settings):
+    work = {
+        "DOI": "10.1234/TEST.1",
+        "title": ["A research study"],
+        "author": [{"given": "A.", "family": "Researcher"}],
+        "published": {"date-parts": [[2024]]},
+        "URL": "http://127.0.0.1/private",
+    }
+
+    def upstream(request):
+        assert str(request.url).startswith("https://api.crossref.org/works?")
+        assert request.url.params["query.bibliographic"] == "retrieval evidence"
+        return httpx.Response(
+            200,
+            json={
+                "status": "ok",
+                "message": {"items": [work, work, {"DOI": "malformed"}]},
+            },
+        )
+
+    with TestClient(create_app(settings)) as api:
+        external = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+        api.app.state.crossref = CrossrefLibrary(external)
+        try:
+            response = api.post(
+                "/api/papers/search",
+                json={
+                    "query": "retrieval evidence",
+                    "source": "crossref",
+                },
+            )
+            assert response.status_code == 200
+            assert len(response.json()) == 1
+            paper = response.json()[0]
+            assert paper["doi"] == "10.1234/test.1"
+            assert paper["url"] == "https://doi.org/10.1234/test.1"
+            assert paper["published"] == "2024"
+            assert paper["source"] == "crossref" and not paper["import_available"]
+            assert api.get("/api/documents").json()["documents"] == []
+            assert (
+                api.post(
+                    "/api/papers/import",
+                    json={
+                        "paper_id": paper["paper_id"],
+                    },
+                ).status_code
+                == 400
+            )
+            assert (
+                api.post(
+                    "/api/papers/search",
+                    json={
+                        "query": "retrieval evidence",
+                        "source": "unknown",
+                    },
+                ).status_code
+                == 422
+            )
+            assert (
+                api.post(
+                    "/api/papers/search",
+                    json={
+                        "query": "retrieval evidence",
+                        "source": "crossref",
+                    },
+                ).status_code
+                == 429
+            )
+        finally:
+            api.portal.call(external.aclose)
+
+
+@pytest.mark.parametrize("payload", [[], {"status": "ok", "message": []}, {"status": "failed"}])
+async def test_crossref_invalid_response_is_provider_error(payload):
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=payload))
+    ) as client:
+        with pytest.raises(ProviderError, match="Crossref"):
+            await CrossrefLibrary(client).search("retrieval evidence")
+
+
+def test_citation_audit_rejects_changed_pdf_coordinates_even_with_recomputed_hash(chunk, evidence):
+    evidence.document_version = "version-1"
+    evidence.source_hash = evidence_source_hash(evidence)
+    claim = Claim(id="cl_test", text=evidence.quote, evidence_ids=[evidence.id])
+    check = ClaimCheck(
+        claim_id=claim.id,
+        verdict="supported",
+        explanation="Exact quote",
+        evidence_ids=[evidence.id],
+    )
+    state = ResearchState(claims=[claim], evidence=[evidence], checks=[check])
+
+    def audit():
+        return audit_citations(
+            state,
+            {chunk.id: [chunk]},
+            {chunk.document_id: "version-1"},
+            verification_snapshot(state),
+            [claim.id],
+        )
+
+    assert audit().accepted_claim_ids == [claim.id]
+    evidence.regions = [
+        SourceRegion(start=evidence.start, end=evidence.end, bbox=[0.0, 0.0, 10.0, 10.0])
+    ]
+    assert evidence.source_hash != evidence_source_hash(evidence)
+    evidence.source_hash = evidence_source_hash(evidence)
+    assert audit().rejected_claim_ids == [claim.id]
+
+
+async def test_academic_followup_questions_use_only_known_requirement_gaps():
+    request = ResearchRequest(
+        question="Compare the study methods and results",
+        requirements=["Study methods", "Study results"],
+        style="literature_review",
+        language="en",
+    )
+    report = await WriterAgent(DemoLanguageModel()).compose(
+        request,
+        [],
+        [],
+        [],
+        ["No researchers have ever studied this topic."],
+        [
+            EvidenceGap(requirement_id="rq_2", reason="no_supported_evidence"),
+            EvidenceGap(requirement_id="unknown", reason="no_supported_evidence"),
+        ],
+        deterministic=True,
+    )
+    assert "Questions for further research" in report.markdown
+    assert "Study results" in report.markdown and "Study methods" not in report.markdown
+    assert "wider literature remains unverified" in report.markdown
+    assert "No researchers" not in report.markdown and "unknown" not in report.markdown
+    assert not report.claim_ids
+
+
+def test_ip_addresses_remain_in_section_context_and_exact_source_units(chunk):
+    text = "1. Network configuration\n10.0.0.1 Internal gateway\n192.168.1.10 Application host"
+    sections = split_headings([SourceSection(text=text)])
+    assert len(sections) == 1 and sections[0].text == text
+    units = source_units([chunk.model_copy(update={"text": text, "end": chunk.start + len(text)})])
+    assert len(units) == 1 and units[0]["text"] == text

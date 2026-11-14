@@ -15,6 +15,39 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AgentRole = Literal["retrieval", "reader", "summarizer", "fact_checker", "writer"]
 Provider = Literal["demo", "gemini", "openai", "ollama", "deepseek"]
+TargetName = Literal["default", "demo", "api", "cpu", "gpu"]
+
+
+class ExecutionTarget(BaseModel):
+    """Validated server endpoints; research requests select names rather than URLs or keys."""
+
+    model_config = ConfigDict(extra="forbid")
+    provider: Literal["gemini", "openai", "ollama", "deepseek"]
+    model: str = Field(min_length=1, max_length=200)
+    base_url: str = ""
+    api_key: SecretStr = SecretStr("")
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "ExecutionTarget":
+        if self.provider != "ollama" and not self.api_key.get_secret_value():
+            raise ValueError("Execution target needs its own API key or worker token")
+        if self.provider in {"openai", "ollama", "deepseek"} and not self.base_url:
+            raise ValueError("Execution target needs an explicit base_url")
+        if self.base_url:
+            url = urlsplit(self.base_url)
+            _ = url.port  # Reject malformed/out-of-range ports before constructing HTTP clients.
+            if (
+                url.scheme not in {"http", "https"}
+                or not url.hostname
+                or url.username
+                or url.password
+                or url.query
+                or url.fragment
+            ):
+                raise ValueError("Invalid execution target URL")
+            if url.scheme == "http" and url.hostname not in {"localhost", "127.0.0.1", "::1"}:
+                raise ValueError("Remote execution targets require HTTPS")
+        return self
 
 
 class AgentRoute(BaseModel):
@@ -51,14 +84,18 @@ class Settings(BaseSettings):
         ),
     )
     agent_max_steps: int = Field(default=6, ge=1, le=16)
-    autonomous_max_steps: int = Field(default=16, ge=1, le=32)
-    autonomous_max_tasks: int = Field(default=16, ge=1, le=32)
+    autonomous_max_steps: int = Field(default=32, ge=1, le=32)
+    autonomous_max_tasks: int = Field(default=32, ge=1, le=32)
     autonomous_parallelism: int = Field(default=5, ge=1, le=5)
     autonomous_team_planning: bool = False
     parallel_task_retries: int = Field(default=1, ge=0, le=3)
     parallel_task_max_calls: int = Field(default=6, ge=1, le=30)
     parallel_task_max_tokens: int = Field(default=30000, ge=1000, le=500000)
     agent_routes: dict[AgentRole, AgentRoute] = Field(default_factory=dict)
+    execution_targets: dict[Literal["api", "cpu", "gpu"], ExecutionTarget] = Field(
+        default_factory=dict
+    )
+    managed_execution_targets: set[Literal["api", "cpu", "gpu"]] = Field(default_factory=set)
     gemini_api_key: SecretStr = SecretStr("")
     gemini_fallback_model: str = ""
     openai_api_key: SecretStr = SecretStr("")

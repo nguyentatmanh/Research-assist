@@ -1,3 +1,5 @@
+import json
+from collections import Counter
 from hashlib import sha256
 
 from research_assist.agents.prompts.summarizer import INSTRUCTION
@@ -56,33 +58,39 @@ class SummarizerAgent:
         evidence: list[Evidence],
         requirements: list[Requirement] | None = None,
     ) -> tuple[list[Claim], list[str], list[str]]:
-        valid_ids = {e.id for e in evidence}
-        claims, rejected, seen = [], 0, set()
+        counts = Counter(e.id for e in evidence)
+        valid_ids = {key for key, count in counts.items() if count == 1}
+        requirement_ids = {r.id for r in (requirements or [])}
+        claims: list[Claim] = []
+        rejected = 0
+        seen: dict[tuple[str, str, tuple[str, ...]], Claim] = {}
         for raw in output.claims:
             if any(key not in valid_ids for key in raw.evidence_ids):
                 rejected += 1
                 continue
-            if raw.text in seen:
-                continue
-            seen.add(raw.text)
-            claims.append(
-                Claim(
-                    id="cl_"
-                    + sha256(
-                        (raw.text + "|" + "|".join(sorted(raw.evidence_ids))).encode()
-                    ).hexdigest()[:24],
-                    text=raw.text,
-                    evidence_ids=list(dict.fromkeys(raw.evidence_ids)),
-                    requirement_ids=[
-                        rid
-                        for rid in raw.requirement_ids
-                        if rid in {r.id for r in (requirements or [])}
-                    ],
-                    kind=raw.kind,
-                )
+            references = list(dict.fromkeys(raw.evidence_ids))
+            related = list(
+                dict.fromkeys(rid for rid in raw.requirement_ids if rid in requirement_ids)
             )
+            identity = (raw.text, raw.kind, tuple(sorted(references)))
+            if identity in seen:
+                previous = seen[identity]
+                previous.requirement_ids = list(
+                    dict.fromkeys([*previous.requirement_ids, *related])
+                )
+                continue
+            claim = Claim(
+                id="cl_"
+                + sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()[:24],
+                text=raw.text,
+                evidence_ids=references,
+                requirement_ids=related,
+                kind=raw.kind,
+            )
+            claims.append(claim)
+            seen[identity] = claim
         warnings = (
-            [f"Summarizer: loại {rejected} nhận định dẫn tới evidence_id không tồn tại."]
+            [f"Summarizer: loại {rejected} nhận định có evidence_id thiếu hoặc không duy nhất."]
             if rejected
             else []
         )

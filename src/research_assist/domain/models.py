@@ -4,6 +4,8 @@ from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from research_assist.config import AgentRole, TargetName
+
 
 class Contract(BaseModel):
     model_config = ConfigDict(
@@ -70,6 +72,7 @@ class RetrievedChunk(Chunk):
 
 class ResearchRequest(Contract):
     question: str = Field(min_length=8, max_length=2000)
+    display_question: str | None = Field(default=None, min_length=1, max_length=2000)
     # A frozen all-document scope can contain the entire corpus, including over 50 files.
     # Membership is validated against the repository when the run is submitted.
     document_ids: list[str] = Field(default_factory=list)
@@ -83,6 +86,7 @@ class ResearchRequest(Contract):
     use_cache: bool = True
     orchestration_mode: Literal["fixed", "adaptive", "autonomous"] | None = None
     requirements: list[str] = Field(default_factory=list, max_length=12)
+    agent_targets: dict[AgentRole, TargetName] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def selected_scope(self) -> "ResearchRequest":
@@ -163,6 +167,7 @@ class Evidence(RawEvidence):
     end: int
     regions: list[SourceRegion] = Field(default_factory=list)
     document_version: str = ""
+    source_hash: str = ""
 
 
 class RawClaim(Contract):
@@ -254,6 +259,7 @@ class WrittenReport(Contract):
     markdown: str
     warnings: list[str] = Field(default_factory=list)
     claim_ids: list[str] = Field(default_factory=list)
+    citation_evidence_ids: list[str] = Field(default_factory=list)
 
 
 class ReportBlock(Contract):
@@ -357,7 +363,7 @@ class ClaimEvidenceLink(Contract):
 
 
 class CitationAudit(Contract):
-    status: Literal["passed", "not_applicable"] = "not_applicable"
+    status: Literal["passed", "failed", "not_applicable"] = "not_applicable"
     snapshot: str = ""
     accepted_claim_ids: list[str] = Field(default_factory=list)
     rejected_claim_ids: list[str] = Field(default_factory=list)
@@ -450,6 +456,7 @@ class AgentUsage(Contract):
 
 
 class ResearchResult(Contract):
+    agent_targets: dict[AgentRole, TargetName] = Field(default_factory=dict)
     run_id: str
     question: str
     title: str
@@ -475,6 +482,8 @@ class ResearchResult(Contract):
     requirements: list[Requirement] = Field(default_factory=list)
     coverage: list[CoverageCheck] = Field(default_factory=list)
     reported_claim_ids: list[str] = Field(default_factory=list)
+    # Ordered as printed in the report: index 0 is the evidence for [1].
+    citation_evidence_ids: list[str] = Field(default_factory=list)
     stop_reason: str = "legacy_result"
     policy_version: str = "unclassified"
     gap_details: list[EvidenceGap] = Field(default_factory=list)

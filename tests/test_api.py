@@ -45,8 +45,15 @@ def test_full_demo_pipeline_and_exports(settings: Settings) -> None:
         }
         assert result["evidence"] and result["checks"]
         assert all(c["verdict"] == "supported" for c in result["checks"])
+        assert result["title"] == record["request"]["question"]
+        assert result["coverage"]
+        assert result["citation_evidence_ids"]
+        assert set(result["citation_evidence_ids"]) <= {e["id"] for e in result["evidence"]}
         exported = client.get(f"/api/runs/{record['id']}/export?format=md")
         assert exported.status_code == 200 and "Nguồn trích dẫn" in exported.text
+        assert "Ghi chú nghiên cứu" not in exported.text
+        assert "## Bằng chứng" not in exported.text
+        assert "Mức đáp ứng câu hỏi" not in exported.text
         exported_json = client.get(f"/api/runs/{record['id']}/export?format=json").json()
         assert exported_json["run_id"] == record["id"]
         assert len(client.get("/api/runs").json()["runs"]) == 1
@@ -73,6 +80,8 @@ def test_unanswerable_question_abstains(settings: Settings) -> None:
         assert not finished["result"]["evidence"]
         assert not finished["result"]["claims"]
         assert "Chưa đủ" in finished["result"]["markdown"]
+        assert finished["result"]["title"] == record["request"]["question"]
+        assert finished["result"]["report_status"] == "abstained"
 
 
 def test_upload_duplicate_delete_and_sql_injection_scope(settings: Settings) -> None:

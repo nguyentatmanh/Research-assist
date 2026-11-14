@@ -6,9 +6,10 @@ from research_assist.agents.fact_checker import FactCheckerAgent
 from research_assist.agents.reader import ReaderAgent
 from research_assist.agents.retrieval import RetrievalAgent
 from research_assist.agents.summarizer import SummarizerAgent
-from research_assist.agents.writer import WriterAgent, escape_markdown
+from research_assist.agents.writer import WriterAgent
 from research_assist.application.adaptive import AdaptiveCoordinator
 from research_assist.application.autonomous import AutonomousCoordinator
+from research_assist.application.citation_audit import audit_run_sources, published_citation_audit
 from research_assist.application.parallel_research import ParallelResearchCoordinator
 from research_assist.application.research_state import ResearchState
 from research_assist.domain.coverage import (
@@ -31,12 +32,26 @@ from research_assist.domain.models import (
 )
 from research_assist.domain.ports import LanguageModel
 from research_assist.domain.workflow import decide_next
-from research_assist.infrastructure.llm import current_step_events, current_usage, usage_scope
+from research_assist.infrastructure.llm import (
+    Usage,
+    current_step_events,
+    current_usage,
+    usage_scope,
+)
 from research_assist.infrastructure.repository import now
 
 T = TypeVar("T")
 EventSink = Callable[[AgentEvent], None]
 Event = Callable[..., None]
+
+
+def runtime_identity(llm: LanguageModel, usage: Usage) -> tuple[str, str]:
+    """Report models actually selected, rather than labeling GPU calls as the default demo."""
+    if not any(target != "default" for target in usage.agent_targets.values()) or not usage.agents:
+        return llm.name, llm.model
+    providers = sorted({entry.provider for entry in usage.agents.values()})
+    models = sorted({entry.model for entry in usage.agents.values()})
+    return providers[0] if len(providers) == 1 else "mixed", " / ".join(models)
 
 
 class Step(Protocol):
@@ -63,8 +78,8 @@ class ResearchPipeline:
         orchestration_mode: Literal["fixed", "adaptive", "autonomous"] = "autonomous",
         coordinator_max_steps: int = 4,
         agent_max_steps: int = 6,
-        autonomous_max_steps: int = 16,
-        autonomous_max_tasks: int = 16,
+        autonomous_max_steps: int = 32,
+        autonomous_max_tasks: int = 32,
         autonomous_parallelism: int = 5,
         autonomous_team_planning: bool = False,
         parallel_task_retries: int = 1,
@@ -196,13 +211,22 @@ class ResearchPipeline:
                 tasks=[t.model_dump() for t in state.tasks.values()],
             )
 
-        with usage_scope(request.profile or self.profile, request.use_cache, mode) as usage:
+        with usage_scope(
+            request.profile or self.profile, request.use_cache, mode, request.agent_targets
+        ) as usage:
+
+            def audit_before_report() -> None:
+                if parallel is not None:
+                    parallel.audit_now()
+                else:
+                    search = getattr(self.retrieval, "search", None)
+                    versions = getattr(search, "source_versions", {})
+                    audit_run_sources(state, request.document_ids, versions)
 
             async def checkpoint() -> None:
                 if on_checkpoint is None or not any(c.verdict == "supported" for c in state.checks):
                     return
-                if parallel is not None:
-                    parallel.audit_now()
+                audit_before_report()
                 report = await self.writer.compose(
                     planned_request,
                     state.claims,
@@ -211,11 +235,13 @@ class ResearchPipeline:
                     state.gaps,
                     state.gap_details,
                     deterministic=True,
+                    user_requirements=request.requirements,
                 )
                 # Deep copy: subsequent worker mutations must not alter a saved checkpoint.
                 saved = ResearchResult(
                     run_id=run_id,
                     question=request.question,
+                    agent_targets=dict(request.agent_targets),
                     title=report.title,
                     markdown=report.markdown,
                     retrieved=list(state.retrieved.values()),
@@ -224,8 +250,8 @@ class ResearchPipeline:
                     checks=state.checks,
                     gaps=state.gaps,
                     events=list(events),
-                    provider=self.llm.name,
-                    model=self.llm.model,
+                    provider=runtime_identity(self.llm, usage)[0],
+                    model=runtime_identity(self.llm, usage)[1],
                     embedding_model=self.embedding_model,
                     llm_calls=usage.calls,
                     input_tokens=usage.input_tokens,
@@ -237,6 +263,7 @@ class ResearchPipeline:
                     requirements=requirements_for(planned_request),
                     coverage=report_coverage(state.coverage, report.claim_ids),
                     reported_claim_ids=report.claim_ids,
+                    citation_evidence_ids=report.citation_evidence_ids,
                     stop_reason="checkpoint",
                     policy_version=EVIDENCE_POLICY,
                     document_ids=request.document_ids,
@@ -260,7 +287,7 @@ class ResearchPipeline:
                     )
                     if report.claim_ids
                     else "abstained",
-                    citation_audit=state.citation_audit,
+                    citation_audit=published_citation_audit(state.citation_audit, report.claim_ids),
                     research_tasks=list(state.research_tasks.values()),
                     evidence_usages=state.evidence_usages,
                     claim_evidence_links=state.claim_evidence_links,
@@ -312,7 +339,7 @@ class ResearchPipeline:
                     update={"requirements": [a.text for a in question_plan.aspects]}
                 )
                 state.coverage = validate_coverage(requirements_for(planned_request), [], [])
-                if mode == "autonomous" and len(request.requirements) == 2:
+                if mode == "autonomous" and len(planned_request.requirements) >= 2:
                     parallel = ParallelResearchCoordinator(
                         self.retrieval,
                         self.reader,
@@ -379,8 +406,7 @@ class ResearchPipeline:
                         estimated_cost_usd=0.0,
                     ),
                 )
-            if parallel is not None:
-                parallel.audit_now()
+            audit_before_report()
             try:
                 report = await step(
                     "writer",
@@ -395,6 +421,7 @@ class ResearchPipeline:
                         deterministic=mode != "fixed"
                         or state.stop_reason in {"budget_exhausted", "provider_error"},
                         layout=state.report_layout if mode == "autonomous" else None,
+                        user_requirements=request.requirements,
                     ),
                     lambda v: {
                         "written_claims": len(v.claim_ids),
@@ -420,6 +447,7 @@ class ResearchPipeline:
                         state.gaps,
                         state.gap_details,
                         deterministic=True,
+                        user_requirements=request.requirements,
                     ),
                 )
             requirements = requirements_for(planned_request)
@@ -429,37 +457,10 @@ class ResearchPipeline:
             stop_reason, round_number = state.stop_reason, state.rounds
             warnings.extend(report.warnings)
             coverage = report_coverage(coverage, report.claim_ids)
-            en = request.language == "en"
-            labels = {
-                "covered": "Đủ ý theo đánh giá model",
-                "partial": "Mới đáp ứng một phần",
-                "missing": "Thiếu bằng chứng",
-                "unassessed": "Chưa đánh giá đầy đủ",
-            }
-            texts = {r.id: r.text for r in requirements}
-            coverage_lines = [
-                "",
-                "## " + ("Question coverage" if en else "Mức đáp ứng câu hỏi"),
-                "",
-            ]
-            for row in coverage:
-                label = row.status if en else labels[row.status]
-                coverage_lines.append(
-                    "- " + escape_markdown(texts[row.requirement_id]) + ": " + label
-                )
             if any(c.status != "covered" for c in coverage):
                 warnings.append(
                     "Báo cáo chưa được xác nhận đáp ứng đầy đủ mọi yêu cầu của câu hỏi."
                 )
-            coverage_lines += [
-                "",
-                "*Coverage is a model assessment, not independently verified accuracy.*"
-                if en
-                else (
-                    "*Độ đầy đủ do model đánh giá; không phải độ chính xác được xác minh độc lập.*"
-                ),
-            ]
-            markdown = report.markdown + "\n".join(coverage_lines) + "\n"
             report_status: Literal["complete", "partial", "abstained"] = (
                 (
                     "complete"
@@ -469,33 +470,11 @@ class ResearchPipeline:
                 if report.claim_ids
                 else "abstained"
             )
-            if parallel is not None:
-                labels_status = {
-                    "complete": "Đầy đủ",
-                    "partial": "Một phần",
-                    "abstained": "Chưa đủ cơ sở",
-                }
-                markdown += "\n## " + ("Research status" if en else "Trạng thái nghiên cứu")
-                markdown += (
-                    "\n\n" + (report_status if en else labels_status[report_status]) + "\n\n"
-                )
-                for requirement in requirements:
-                    tasks = [
-                        t
-                        for t in state.task_graph.values()
-                        if t.requirement_ids == [requirement.id]
-                    ]
-                    attempts = ", ".join(f"{t.role}: {t.attempts}" for t in tasks)
-                    reasons = "; ".join(dict.fromkeys(t.message for t in tasks if t.message))
-                    markdown += "- " + escape_markdown(requirement.text) + ": " + attempts
-                    if reasons:
-                        markdown += " — " + escape_markdown(reasons)
-                    markdown += "\n"
             if usage.missing_usage:
                 warnings.append(
                     "Một số phản hồi thiếu thống kê token; số token hiển thị chưa đầy đủ."
                 )
-            if self.llm.name == "demo":
+            if getattr(self.llm, "uses_demo_only", lambda: self.llm.name == "demo")():
                 warnings.append(
                     "Demo trích xuất: không gọi LLM; "
                     "kết quả không thể dùng để đánh giá chất lượng AI."
@@ -503,23 +482,25 @@ class ResearchPipeline:
             result = ResearchResult(
                 run_id=run_id,
                 question=request.question,
+                agent_targets=dict(request.agent_targets),
                 requirements=requirements,
                 coverage=coverage,
                 reported_claim_ids=report.claim_ids,
+                citation_evidence_ids=report.citation_evidence_ids,
                 stop_reason=stop_reason,
                 policy_version=EVIDENCE_POLICY,
                 document_ids=request.document_ids,
                 gap_details=gap_details,
                 title=report.title,
-                markdown=markdown,
+                markdown=report.markdown,
                 retrieved=list(all_chunks.values()),
                 evidence=final_evidence,
                 claims=claims,
                 checks=checks,
                 gaps=gaps,
                 events=events,
-                provider=self.llm.name,
-                model=self.llm.model,
+                provider=runtime_identity(self.llm, usage)[0],
+                model=runtime_identity(self.llm, usage)[1],
                 embedding_model=self.embedding_model,
                 llm_calls=usage.calls,
                 input_tokens=usage.input_tokens,
@@ -540,7 +521,7 @@ class ResearchPipeline:
                     else None
                 ),
                 report_status=report_status,
-                citation_audit=state.citation_audit,
+                citation_audit=published_citation_audit(state.citation_audit, report.claim_ids),
                 research_tasks=list(state.research_tasks.values()),
                 evidence_usages=state.evidence_usages,
                 claim_evidence_links=state.claim_evidence_links,

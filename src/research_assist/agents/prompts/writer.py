@@ -13,7 +13,7 @@ visible; do not hide a relevant limitation by selecting only convenient claims.
 - Do not rewrite, translate or combine claim text, add connecting factual prose, generate
 new claims, change numbers, infer missing steps or create citation markers/references.
 The application inserts immutable claim text and source citations after your selection.
-- Use neutral headings from: Evidence, Methods, Results, Comparison, Limitations. Return
+- Use neutral headings from: Answer, Methods, Results, Comparison, Limitations. Return
 1-5 sections when there are relevant claims, or sections=[] when there are none. Titles
 are assigned by the application; provide only a neutral placeholder title.
 

@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from research_assist.agents.fact_checker import FactCheckerAgent
-from research_assist.agents.policies.verification import numbers
+from research_assist.agents.policies.verification import numbers, validate_checks
 from research_assist.agents.writer import WriterAgent
 from research_assist.config import Settings
 from research_assist.domain.coverage import report_coverage, requirements_for, validate_coverage
@@ -15,6 +15,8 @@ from research_assist.domain.models import (
     ClaimCheck,
     CoverageCheck,
     Evidence,
+    FactCheckOutput,
+    Requirement,
     ResearchRequest,
 )
 from research_assist.domain.workflow import decide_next
@@ -38,9 +40,107 @@ def test_number_guard_distinguishes_measurements_from_list_ordinals(text, expect
     assert numbers(text) == expected
 
 
+@pytest.mark.parametrize(
+    "claim,quote",
+    [
+        ("Memory is 5 GB.", "Memory is 5 MB."),
+        ("Latency is 5 ms.", "Latency is 5 s."),
+        ("Latency is 5,5 ms.", "Latency is 5,5 s."),
+        ("Memory is 1,000,000 GB.", "Memory is 1,000,000 MB."),
+    ],
+)
+def test_unit_mismatches_rejected_even_when_model_approves(evidence, claim, quote):
+    evidence.quote = quote
+    item = Claim(id="claim_units", text=claim, evidence_ids=[evidence.id])
+    check = ClaimCheck(
+        claim_id=item.id,
+        verdict="supported",
+        evidence_ids=[evidence.id],
+        explanation="Model approved",
+    )
+    assert validate_checks([item], [evidence], [check])[0].verdict == "insufficient"
+
+
 def test_number_guard_does_not_equate_opposite_signs_or_scientific_exponents():
     assert not numbers("The change is -5%.").issubset(numbers("The change is 5%."))
     assert not numbers("The rate is 1e-3.").issubset(numbers("The rate is 1."))
+
+
+@pytest.mark.parametrize(
+    "source,text,verdict",
+    [
+        ("The test reported p > 0.05.", "The test reported p < 0.05.", "insufficient"),
+        ("The test reported p = 0.05.", "The test reported p < 0.05.", "insufficient"),
+        ("The test reported p <= 0.05.", "The test reported p ≤ 0.05.", "supported"),
+        ("The test reported p = 1e-3.", "The test reported p-value = 1e-3.", "supported"),
+        ("The test reported p > 0,05.", "Kết quả có p < 0,05.", "insufficient"),
+        ("Threshold 0.05; no test was run.", "The test reported p < 0.05.", "insufficient"),
+        ("Not p < 0.05, but p > 0.05.", "The test reported p < 0.05.", "insufficient"),
+        ("Không phải p < 0.05, mà p > 0.05.", "Kết quả có p < 0.05.", "insufficient"),
+        ("95% CI [0.2, 0.8].", "The result has 95% CI [0.8, 0.2].", "insufficient"),
+        (
+            "90% CI [0.2, 0.8]; 95% CI [0.1, 0.9].",
+            "The result has 95% CI [0.2, 0.8].",
+            "insufficient",
+        ),
+        (
+            "The 95% confidence interval is [0.2, 0.8].",
+            "Kết quả có 95% khoảng tin cậy [0.2, 0.8].",
+            "supported",
+        ),
+    ],
+)
+def test_statistical_relations_cannot_be_reassembled_from_number_bags(
+    evidence, source, text, verdict
+):
+    ev = evidence.model_copy(update={"quote": source})
+    claim = Claim(id="c", text=text, evidence_ids=[ev.id])
+    check = ClaimCheck(claim_id="c", verdict="supported", evidence_ids=[ev.id], explanation="OK")
+    assert validate_checks([claim], [ev], [check])[0].verdict == verdict
+
+
+def test_confidence_interval_cannot_be_assembled_across_citations(evidence):
+    low = evidence.model_copy(update={"quote": "95% CI [0.2, 0.8]."})
+    high = evidence.model_copy(update={"id": "other", "quote": "95% CI [0.1, 0.9]."})
+    claim = Claim(
+        id="c", text="The 95% CI [0.2, 0.9] was reported.", evidence_ids=[low.id, high.id]
+    )
+    check = ClaimCheck(
+        claim_id="c", verdict="supported", evidence_ids=claim.evidence_ids, explanation="OK"
+    )
+    assert validate_checks([claim], [low, high], [check])[0].verdict == "insufficient"
+
+
+def test_code_criticism_becomes_bounded_revision_request(evidence):
+    claim = Claim(
+        id="c", text="RAG reaches 99% accuracy.", evidence_ids=[evidence.id], requirement_ids=["r"]
+    )
+    check = ClaimCheck(
+        claim_id="c", verdict="supported", evidence_ids=[evidence.id], explanation="Wrong approval"
+    )
+    llm = ScriptedLLM({})
+    output = FactCheckerAgent(llm).validate_output(
+        FactCheckOutput(checks=[check]),
+        [claim],
+        [evidence],
+        [Requirement(id="r", text="Report measured accuracy")],
+    )
+    assert output.checks[0].verdict == "insufficient"
+    assert len(output.requests) == 1 and output.requests[0].action == "revise"
+    assert output.requests[0].claim_ids == [claim.id]
+    assert output.requests[0].requirement_ids == ["r"]
+    assert output.checks[0].explanation in output.requests[0].need
+    assert not llm.calls
+
+
+@pytest.mark.parametrize("verdict", ["insufficient", "contradicted"])
+def test_statistical_guard_never_promotes_semantic_rejection(evidence, verdict):
+    ev = evidence.model_copy(update={"quote": "The encoder test reported p < 0.05."})
+    claim = Claim(id="c", text="The decoder test reported p < 0.05.", evidence_ids=[ev.id])
+    check = ClaimCheck(
+        claim_id="c", verdict=verdict, evidence_ids=[ev.id], explanation="Wrong tested model"
+    )
+    assert validate_checks([claim], [ev], [check])[0].verdict == verdict
 
 
 def claim_and_check(evidence: Evidence) -> tuple[Claim, ClaimCheck]:

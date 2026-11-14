@@ -3,6 +3,7 @@
 import asyncio
 import re
 import time
+from typing import Literal
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
@@ -21,10 +22,18 @@ class Paper(BaseModel):
     authors: list[str]
     published: str
     url: str
+    source: Literal["arxiv", "crossref"] = "arxiv"
+    doi: str | None = None
+    import_available: bool = True
 
 
 async def _download(
-    client: httpx.AsyncClient, url: str, limit: int, params: dict[str, str] | None = None
+    client: httpx.AsyncClient,
+    url: str,
+    limit: int,
+    params: dict[str, str] | None = None,
+    *,
+    provider: str = "arXiv",
 ) -> bytes:
     try:
         async with (
@@ -39,16 +48,18 @@ async def _download(
             ) as response,
         ):
             if response.status_code == 429:
-                raise CapacityError("arXiv đang giới hạn lượt truy cập. Hãy thử lại sau.")
+                raise CapacityError(f"{provider} đang giới hạn lượt truy cập. Hãy thử lại sau.")
             response.raise_for_status()
             data = bytearray()
             async for part in response.aiter_bytes(65536):
                 if len(data) + len(part) > limit:
-                    raise DocumentError("Dữ liệu từ arXiv vượt giới hạn dung lượng.")
+                    raise DocumentError(f"Dữ liệu từ {provider} vượt giới hạn dung lượng.")
                 data.extend(part)
             return bytes(data)
     except (httpx.HTTPError, TimeoutError) as exc:
-        raise ProviderError("Không nhận được phản hồi hợp lệ từ arXiv. Hãy thử lại sau.") from exc
+        raise ProviderError(
+            f"Không nhận được phản hồi hợp lệ từ {provider}. Hãy thử lại sau."
+        ) from exc
 
 
 class ArxivLibrary:

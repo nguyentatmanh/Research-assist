@@ -27,6 +27,7 @@ from research_assist.domain.errors import (
 )
 from research_assist.domain.models import (
     CoverageCheck,
+    FollowUpRequest,
     QuestionAspect,
     QuestionPlan,
     ResearchRequest,
@@ -157,7 +158,7 @@ class Checker(FactCheckerAgent):
         return result
 
 
-def coordinator(search=None, reader_barrier=False, retries=1):
+def coordinator(search=None, reader_barrier=False, retries=1, **limits):
     search = search or Search()
     llm = DemoLanguageModel()
     reader = Reader(llm, search, reader_barrier)
@@ -168,6 +169,7 @@ def coordinator(search=None, reader_barrier=False, retries=1):
         Checker(llm),
         WriterAgent(llm),
         retries=retries,
+        **limits,
     ), reader
 
 
@@ -400,15 +402,21 @@ async def test_pipeline_outputs_complete_partial_and_abstained_with_audit(failur
         )
 
 
-async def test_http_pipeline_uses_frozen_sources_and_persists_audited_result(settings):
+@pytest.mark.parametrize("count,bad_reader", [(2, False), (12, False), (2, True)])
+async def test_http_pipeline_uses_frozen_sources_and_persists_audited_result(
+    settings, count, bad_reader
+):
     from research_assist.bootstrap import build_container
+
+    names = ["Alpha", "Beta"] if count == 2 else [f"Topic{i}" for i in range(count)]
+    requirements = [f"Research {name} findings" for name in names]
 
     def provider(req):
         body = json.loads(req.content)
         payload = json.loads(body["messages"][1]["content"])
         task = body["response_format"]["json_schema"]["name"]
         if task == "question_plan":
-            output = plan().model_dump()
+            output = {"aspects": [{"text": text, "query": text} for text in requirements]}
         elif task == "read_evidence":
             unit = payload["source_units"][0]
             output = {
@@ -422,6 +430,9 @@ async def test_http_pipeline_uses_frozen_sources_and_persists_audited_result(set
                 ],
                 "gaps": [],
             }
+            if bad_reader and "Alpha" in payload["requirements"][0]:
+                # Schema repair must not spend the reserved final verification calls.
+                output = {"evidence": [{"chunk_id": "missing-required-fields"}]}
         elif task == "synthesize_claims":
             output = {
                 "claims": [
@@ -471,20 +482,28 @@ async def test_http_pipeline_uses_frozen_sources_and_persists_audited_result(set
     settings.orchestration_mode = "autonomous"
     settings.llm_requests_per_minute = 1000
     settings.parallel_task_max_tokens = 60000
+    settings.llm_max_calls = 5 if bad_reader else 12
     container = build_container(settings, transport=httpx.MockTransport(provider))
     try:
         docs = []
-        for name in ("Alpha", "Beta"):
+        for name in names:
             doc, _ = await container.documents.ingest(source(name).text.encode(), name + ".txt")
             docs.append(doc.id)
-        req = request().model_copy(update={"document_ids": docs})
+        req = request().model_copy(update={"document_ids": docs, "requirements": requirements})
         result = await container.runs.pipeline.run("run_http_mvp", req, lambda e: None)
-        assert result.report_status == "complete"
+        assert result.report_status == ("complete" if count == 2 and not bad_reader else "partial")
         assert result.citation_audit.status == "passed"
-        assert len(result.evidence_usages) >= 2
+        assert len(result.evidence_usages) >= min(count, 9) - int(bad_reader)
         assert sum(t.budget.model_calls for t in result.research_tasks) == result.llm_calls - 1
         assert all(e.document_version for e in result.evidence)
         assert result.input_tokens == sum(a.input_tokens for a in result.agent_usage)
+        assert result.llm_calls <= settings.llm_max_calls
+        assert len([t for t in result.task_graph if t.role == "retrieval"]) == min(count, 9)
+        if count == 12:
+            assert result.stop_reason == "task_limit"
+            assert any("rq_10" in warning for warning in result.warnings)
+        if bad_reader:
+            assert any(t.role == "reader" and t.status == "failed" for t in result.task_graph)
     finally:
         await container.close()
 
@@ -727,6 +746,325 @@ async def test_audit_removes_fabricated_claims_before_checkpoint_and_final_outpu
     checkpoints = []
     result = await pipeline.run("run_invalid_quote", request(), lambda e: None, checkpoints.append)
     assert result.report_status == "abstained" and not result.reported_claim_ids
-    assert result.citation_audit.rejected_claim_ids
+    assert result.citation_audit.rejected_claim_ids or all(
+        check.verdict != "supported" for check in result.checks
+    )
     assert "Fabricated finding" not in result.markdown
     assert all(not saved.reported_claim_ids for saved in checkpoints)
+
+
+@pytest.mark.parametrize("count,fail_last", [(3, False), (12, False), (3, True)])
+async def test_n_way_branches_are_bounded_scoped_and_join_after_partial_failure(count, fail_last):
+    class ManySearch(Search):
+        def __init__(self):
+            super().__init__()
+            self.active = self.peak = 0
+            self.pair = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def search(self, queries, document_ids, top_k, mode):
+            name = queries[0].split()[1]
+            self.calls.append(name)
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            if self.active == 2:
+                self.pair.set()
+            try:
+                await self.release.wait()
+                if fail_last and name == f"Topic{count - 1}":
+                    raise ProviderUnavailable("One branch is unavailable.")
+                return [source(name)], []
+            finally:
+                self.active -= 1
+
+    req = request().model_copy(
+        update={
+            "requirements": [f"Research Topic{i} findings" for i in range(count)],
+            "document_ids": [f"doc_Topic{i}" for i in range(count)],
+        }
+    )
+    query_plan = QuestionPlan(aspects=[QuestionAspect(text=t, query=t) for t in req.requirements])
+    search = ManySearch()
+    team, reader = coordinator(search, retries=0, parallelism=2)
+    state = ResearchState()
+
+    async def run():
+        with usage_scope():
+            await team.run(req, query_plan, state, inline_step, lambda *a, **kw: None)
+
+    work = asyncio.create_task(run())
+    try:
+        await asyncio.wait_for(search.pair.wait(), 3)
+        assert len(search.calls) == 2
+        search.release.set()
+        await asyncio.wait_for(work, 3)
+    finally:
+        search.release.set()
+        work.cancel()
+        await asyncio.gather(work, return_exceptions=True)
+    assert search.peak == 2 and team.search_calls == count
+    assert len(state.task_graph) == 2 * count + 4
+    assert len(state.evidence) == count - int(fail_last)
+    assert all(ids == ["ch_" + texts[0].split()[1]] for texts, ids in reader.seen)
+    summary = next(t for t in state.task_graph.values() if t.role == "summarizer")
+    assert len(summary.depends_on) == count
+    assert set(summary.dependency_conditions.values()) == {"ON_TERMINAL"}
+    assert summary.requirement_ids == [f"rq_{i + 1}" for i in range(count)]
+    assert len(state.citation_audit.accepted_claim_ids) == count - int(fail_last)
+    if fail_last:
+        assert state.coverage[-1].status == "missing"
+        assert [
+            t.status for t in state.task_graph.values() if t.requirement_ids == [f"rq_{count}"]
+        ] == ["failed", "skipped"]
+
+
+@pytest.mark.parametrize("limit", [1, 8, 32])
+async def test_inferred_requirements_use_n_way_and_reserve_verification_budget(limit):
+    class PlannedRetrieval(RetrievalAgent):
+        async def prepare(self, req):
+            return QuestionPlan(
+                aspects=[
+                    QuestionAspect(text=t, query=t)
+                    for t in [*request().requirements, "Research Gamma findings"]
+                ]
+            )
+
+    llm, search = DemoLanguageModel(), Search()
+    pipeline = ResearchPipeline(
+        llm,
+        PlannedRetrieval(llm, search, NoReranker()),
+        Reader(llm, search),
+        SummarizerAgent(llm),
+        Checker(llm),
+        WriterAgent(llm),
+        None,
+        autonomous_max_tasks=limit,
+        autonomous_max_steps=limit,
+    )
+    result = await pipeline.run(
+        "run_inferred", request().model_copy(update={"requirements": []}), lambda e: None
+    )
+    assert len(result.requirements) == 3
+    assert len(result.task_graph) <= limit
+    if limit == 1:
+        assert result.stop_reason == "budget_exhausted" and not search.calls
+        assert result.report_status == "abstained"
+    else:
+        # The third initial branch has no supporting source, so with enough
+        # slots it gets one more search before the result is reported.
+        expected = 2 if limit == 8 else 4
+        assert len([t for t in result.task_graph if t.role == "retrieval"]) == expected
+        assert result.citation_audit.status == "passed"
+        assert all(t.status == "completed" for t in result.task_graph if t.role == "writer")
+        if limit == 8:
+            assert result.stop_reason == "task_limit"
+            assert result.coverage[-1].status != "covered"
+            assert any("rq_3" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize(
+    "outcome", ["repaired", "provider_error", "budget", "task_limit", "round_limit"]
+)
+async def test_critic_repair_is_bounded_and_keeps_previous_verified_snapshot(outcome):
+    team, _ = coordinator(max_tasks=8 if outcome == "task_limit" else 32)
+    llm = DemoLanguageModel()
+    calls = []
+
+    class Summary(SummarizerAgent):
+        async def run(self, question, evidence, language, requirements=None, requests=None):
+            claims, gaps, warnings = await super().run(
+                question, evidence, language, requirements, requests
+            )
+            for claim in claims:
+                claim.requirement_ids = ["rq_1" if "Alpha" in claim.text else "rq_2"]
+            if not requests:
+                claims[0] = claims[0].model_copy(update={"text": "Unsupported initial claim."})
+            else:
+                assert requests[0].claim_ids == [claims[0].id]
+                calls.append("revise")
+                if outcome in {"provider_error", "budget"}:
+                    claims[0] = claims[0].model_copy(update={"text": "UNVERIFIED REPAIR DRAFT"})
+            return claims, gaps, warnings
+
+    class Critic(FactCheckerAgent):
+        async def assess(self, question, claims, evidence, requirements, gaps=None):
+            if calls:
+                assert team.state.claims[0].text == "Unsupported initial claim."
+                assert any(check.verdict == "supported" for check in team.state.checks)
+                if outcome == "provider_error":
+                    raise ProviderUnavailable("Repair checker unavailable.")
+                if outcome == "budget":
+                    raise BudgetExceeded("Repair exhausted the run budget.")
+            result = await super().assess(question, claims, evidence, requirements, gaps)
+            supported = {c.claim_id for c in result.checks if c.verdict == "supported"}
+            result.coverage = [
+                CoverageCheck(
+                    requirement_id=r.id,
+                    status="covered" if ids else "missing",
+                    claim_ids=ids,
+                    explanation="Fixture verifies only exact supported source claims.",
+                )
+                for r in requirements
+                for ids in [
+                    [c.id for c in claims if c.id in supported and r.id in c.requirement_ids]
+                ]
+            ]
+            if not calls:
+                result.requests = [
+                    FollowUpRequest(
+                        action="revise",
+                        requirement_ids=claims[0].requirement_ids,
+                        claim_ids=[claims[0].id],
+                        need="Replace the unsupported statement with evidence.",
+                    )
+                ]
+            return result
+
+    team.summarizer, team.checker = Summary(llm), Critic(llm)
+    state = ResearchState()
+    req = request().model_copy(update={"max_rounds": 1 if outcome == "round_limit" else 2})
+    with usage_scope():
+        if outcome == "budget":
+            with pytest.raises(BudgetExceeded):
+                await team.run(req, plan(), state, inline_step, lambda *a, **kw: None)
+        else:
+            await team.run(req, plan(), state, inline_step, lambda *a, **kw: None)
+    team.audit_now()
+    assert len([t for t in state.task_graph.values() if t.role == "summarizer"]) <= 2
+    assert all("UNVERIFIED" not in claim.text for claim in state.claims)
+    if outcome == "repaired":
+        assert len(state.citation_audit.accepted_claim_ids) == 2
+        assert state.stop_reason == "requirements_covered"
+    else:
+        assert len(state.citation_audit.accepted_claim_ids) == 1
+        assert state.claims[0].text == "Unsupported initial claim."
+    if outcome in {"task_limit", "round_limit"}:
+        assert not calls and state.rounds == 1
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        "retrieved",
+        "read_context",
+        "multi_context",
+        "implicit",
+        "no_new",
+        "failed",
+        "outside",
+        "context_outside",
+        "section_outside",
+    ],
+)
+async def test_focused_search_repair_stages_new_evidence_until_checked(outcome):
+    class FocusedSearch(Search):
+        async def read_section(self, seeds, document_ids):
+            branch = seeds[0].document_title
+            assert branch == "Alpha" or outcome == "multi_context"
+            assert [c.id for c in seeds] == [f"ch_{branch}"]
+            assert document_ids == request().document_ids
+            self.calls.append(branch)
+            items = [
+                *seeds,
+                source(
+                    branch,
+                    start=200,
+                    text=f"Research {branch} reported missing robustness details across datasets.",
+                ).model_copy(update={"id": f"ch_{branch}_detail"}),
+            ]
+            if outcome == "section_outside":
+                items[-1].section = "Unrelated section"
+            return items
+
+        async def search(self, queries, document_ids, top_k, mode):
+            result, notes = await super().search(queries, document_ids, top_k, mode)
+            if (
+                "missing robustness details" in queries[0] and outcome != "no_new"
+            ) or "unanswered aspect: Research Alpha findings" in queries[0]:
+                extra = source(
+                    "Alpha",
+                    start=200,
+                    text="Research Alpha reported missing robustness details across datasets.",
+                ).model_copy(update={"id": "ch_Alpha_detail"})
+                if outcome == "outside":
+                    extra.document_id = "doc_not_selected"
+                return [*result, extra], notes
+            return result, notes
+
+    search = FocusedSearch()
+    team, _ = coordinator(search, retries=0)
+    assessments = []
+    reader_requests = []
+
+    class FocusedReader(Reader):
+        async def run(self, question, chunks, requirements=None, requests=None):
+            if requests:
+                reader_requests.extend(requests)
+                branch = requirements[0].split()[1]
+                assert branch == "Alpha" or outcome == "multi_context"
+                assert {chunk.document_id for chunk in chunks} <= {f"doc_{branch}"}
+            return await super().run(question, chunks, requirements, requests)
+
+    class Critic(Checker):
+        async def assess(self, question, claims, evidence, requirements, gaps=None):
+            if assessments:
+                assert len(team.state.evidence) == 2
+                assert verification_snapshot(team.state) == team.approved_snapshot
+                assert len(evidence) == (4 if outcome == "multi_context" else 3)
+                if outcome == "failed":
+                    raise ProviderUnavailable("Repair verification failed.")
+            result = await super().assess(question, claims, evidence, requirements, gaps)
+            assessments.append(len(evidence))
+            if len(assessments) == 1 and outcome == "implicit":
+                result.coverage[0] = CoverageCheck(
+                    requirement_id="rq_1",
+                    status="missing",
+                    explanation="Alpha's robustness details remain unanswered.",
+                )
+            elif len(assessments) == 1:
+                result.requests = [
+                    FollowUpRequest(
+                        action="read_context"
+                        if outcome
+                        in {"read_context", "multi_context", "context_outside", "section_outside"}
+                        else "retrieve",
+                        requirement_ids=["rq_1", "rq_2"]
+                        if outcome == "multi_context"
+                        else ["rq_1"],
+                        chunk_ids=["ch_Alpha", "ch_Beta"]
+                        if outcome == "multi_context"
+                        else ["ch_Beta" if outcome == "context_outside" else "ch_Alpha"],
+                        need="Find missing robustness details for the Alpha study.",
+                    )
+                ]
+            return result
+
+    team.checker = Critic(DemoLanguageModel())
+    team.reader = FocusedReader(DemoLanguageModel(), search)
+    state = await run_team(team)
+    team.audit_now()
+    if outcome == "multi_context":
+        assert len(search.calls) == 4 and len(state.task_graph) == 14
+        assert sorted((r.requirement_ids, r.chunk_ids) for r in reader_requests) == [
+            (["rq_1"], ["ch_Alpha"]),
+            (["rq_2"], ["ch_Beta"]),
+        ]
+        assert assessments == [2, 4]
+        assert len(state.evidence) == len(state.citation_audit.accepted_claim_ids) == 4
+        return
+    assert len(search.calls) == (2 if outcome == "context_outside" else 3)
+    assert search.calls.count("Beta") == 1
+    assert len(state.task_graph) == 12 and state.rounds == 2
+    if outcome in {"retrieved", "read_context", "implicit"}:
+        assert len(reader_requests) == 1
+        assert reader_requests[0].requirement_ids == ["rq_1"]
+        repair = [t for t in state.task_graph.values() if t.id in team.repair_readers]
+        assert repair[0].requested_by == (
+            "orchestrator" if outcome == "implicit" else "fact_checker"
+        )
+        assert assessments == [2, 3]
+        assert len(state.evidence) == 3 and len(state.citation_audit.accepted_claim_ids) == 3
+    else:
+        assert len(state.evidence) == 2 and len(state.citation_audit.accepted_claim_ids) == 2
+        assert all("missing robustness" not in c.text for c in state.claims)
+    assert all(ev.document_id in request().document_ids for ev in state.evidence)

@@ -17,6 +17,7 @@ from research_assist.agents.summarizer import SummarizerAgent
 from research_assist.agents.writer import WriterAgent
 from research_assist.application.agent_runtime import AgentRuntime, AgentTool, Event, Step
 from research_assist.application.research_state import ResearchState
+from research_assist.application.task_execution import fingerprint
 from research_assist.application.task_graph import TaskGraph
 from research_assist.domain.coverage import gap_messages, reconcile_gaps, requirements_for
 from research_assist.domain.errors import (
@@ -124,6 +125,19 @@ class AutonomousCoordinator:
         self.writer_done = False
         self.retrieval_done = False
         self._commit_lock = asyncio.Lock()
+        self._active = True
+        frozen = getattr(self.retrieval.search, "frozen_chunks", {})
+        self._corpus_fingerprint = fingerprint(
+            [
+                request.model_dump(),
+                planned.model_dump(),
+                plan.model_dump(),
+                [
+                    chunk.model_dump(exclude={"vector"})
+                    for _, chunk in sorted(frozen.items())
+                ],
+            ]
+        )
         try:
             if self.team_planning:
                 await self._plan_team()
@@ -184,6 +198,9 @@ class AutonomousCoordinator:
             state.warnings.append(str(exc))
         except BudgetExceeded:
             self._close("Budget exhausted before this task completed.")
+            raise
+        except asyncio.CancelledError:
+            self._close("Research was cancelled before this task completed.")
             raise
         if state.stop_reason not in {"requirements_covered", "tasks_completed"}:
             state.warnings.append("Điều phối đã dừng; báo cáo giữ kết quả kiểm chứng gần nhất.")
@@ -291,12 +308,66 @@ class AutonomousCoordinator:
         return item
 
     def _artifact_version(self, role: WorkerRole) -> str:
-        inbox_size = sum(m.recipient == role for m in self.state.peer_messages)
+        # Hash actual inputs, not just their count: same-size edits must invalidate work.
+        inputs: list[object] = [
+            self._corpus_fingerprint,
+            [m.model_dump() for m in self.state.peer_messages if m.recipient == role],
+            self.source_revision,
+            self.active_chunks,
+            [c.model_dump() for _, c in sorted(self.state.retrieved.items())],
+        ]
         if role == "retrieval":
-            return f"frozen-corpus:{inbox_size}"
-        return json.dumps(
-            [self.source_revision, self.artifact_revision, self.checked_revision, inbox_size]
+            inputs.append(self.searches)
+        else:
+            inputs.extend(
+                [
+                    self.artifact_revision,
+                    self.checked_revision,
+                    [e.model_dump() for e in self.evidence],
+                    [c.model_dump() for c in self.proposals],
+                    [c.model_dump() for c in self.state.checks],
+                ]
+            )
+        return fingerprint(inputs)
+
+    def _task_version(self, task: RuntimeTask) -> str:
+        return fingerprint(
+            [
+                self._artifact_version(task.role),
+                task.id,
+                task.instruction,
+                task.requirement_ids,
+                task.chunk_ids,
+                task.claim_ids,
+                task.generation,
+                self.inspected.get(task.id, []),
+                [self.graph.tasks[dep].model_dump() for dep in task.depends_on],
+            ]
         )
+
+    def _validate_action(self, task: RuntimeTask, generation: int, expected: str) -> None:
+        current = asyncio.current_task()
+        if (
+            not self._active
+            or task.status != "running"
+            or (current is not None and current.cancelling())
+        ):
+            # Cancellation is terminal, not a repairable model action. In particular,
+            # do not loop on a bounded source handoff after an adapter swallowed it.
+            raise asyncio.CancelledError
+        if task.generation != generation or self._task_version(task) != expected:
+            raise ActionRejected(
+                "Task lease or source artifacts changed before commit; "
+                "inspect current evidence again."
+            )
+
+    async def _commit_action(
+        self, task: RuntimeTask, generation: int, expected: str, publish: Callable[[], R]
+    ) -> R:
+        """Publish synchronous mutations only; providers and checkpoints run outside the lock."""
+        async with self._commit_lock:
+            self._validate_action(task, generation, expected)
+            return publish()
 
     def _next_role(self) -> WorkerRole | None:
         """Choose missing/stale prerequisites; worker requests take priority in run()."""
@@ -339,8 +410,10 @@ class AutonomousCoordinator:
         )
 
     def _close(self, message: str) -> None:
+        self._active = False
         for task in self.graph.tasks.values():
             if task.status in {"pending", "running", "waiting"}:
+                task.generation += 1
                 task.status, task.message = "blocked", message
         for session in self.state.sessions.values():
             if session.status in {"pending", "running", "waiting"}:
@@ -436,6 +509,11 @@ class AutonomousCoordinator:
                 await self._worker(task, session, WriterOutput, self._accept_layout, child)
         except BudgetExceeded:
             raise
+        except asyncio.CancelledError:
+            task.generation += 1
+            task.status, session.status = "cancelled", "cancelled"
+            task.message = session.message = "Task cancelled before publication."
+            raise
         except ProviderError as exc:
             task.status, session.status = "blocked", "blocked"
             task.message, session.message = str(exc), str(exc)
@@ -456,11 +534,31 @@ class AutonomousCoordinator:
         task: RuntimeTask,
         session: AgentSession,
         output: type[T],
-        accept: Callable[[T, RuntimeTask], Awaitable[None]],
+        accept: Callable[[T, RuntimeTask], None],
         child: Callable[[TaskRequest], str],
     ) -> None:
         async def finish(result: T) -> None:
-            await accept(result, task)
+            checkpoint_needed = False
+
+            def publish() -> None:
+                nonlocal checkpoint_needed
+                previous = self.state.checks
+                try:
+                    accept(result, task)
+                finally:
+                    checkpoint_needed = (
+                        task.role == "fact_checker" and self.state.checks is not previous
+                    )
+
+            try:
+                await self._commit_action(
+                    task, task.generation, self._task_version(task), publish
+                )
+            finally:
+                # Verification can deliberately reject a verdict after recording the
+                # safe snapshot for repair. Persist that snapshot without locking I/O.
+                if checkpoint_needed:
+                    await self.state.save_checkpoint()
 
         def handoff() -> T | None:
             limit = self.request.max_rounds if self.checker_done else 1
@@ -480,8 +578,7 @@ class AutonomousCoordinator:
             result = output.model_validate(
                 SearchCompletion(chunk_ids=self.active_chunks).model_dump()
             )
-            async with self._commit_lock:
-                await finish(result)
+            await finish(result)
             session.status = "completed"
             session.message = "Đã bàn giao nguồn đã tìm được khi API Retrieval tạm gián đoạn."
             self.state.warnings.append(session.message)
@@ -507,12 +604,9 @@ class AutonomousCoordinator:
     ) -> None:
         async def guarded(work: Callable[[], Awaitable[R]], expected: str) -> R:
             async with self._commit_lock:
-                if self._artifact_version(task.role) != expected:
-                    raise ActionRejected(
-                        "Artifacts changed before applying the action; "
-                        "inspect current evidence again."
-                    )
-                return await work()
+                self._validate_action(task, task.generation, expected)
+            # Async tools stage their inputs and validate again before publication.
+            return await work()
 
         await AgentRuntime(self.llm, self.worker_steps).run(
             session,
@@ -520,7 +614,7 @@ class AutonomousCoordinator:
             output=output,
             tools=self._worker_tools(task),
             context=lambda: self._context(task),
-            revision=lambda: self._artifact_version(task.role),
+            revision=lambda: self._task_version(task),
             accept=finish,
             request_task=child,
             fallback=lambda: self._worker_fallback(task, output),
@@ -535,6 +629,16 @@ class AutonomousCoordinator:
         if any(cid not in self.state.retrieved for cid in keys):
             raise ActionRejected("Chunk ID is not in this run's observed source scope.")
         return [self.state.retrieved[cid] for cid in keys][:12]
+
+    def _task_chunks(
+        self, task: RuntimeTask, ids: list[str] | None = None
+    ) -> list[RetrievedChunk]:
+        allowed = self.inspected.get(task.id, task.chunk_ids or self.active_chunks)
+        if task.role == "reader":
+            if ids is not None and not set(ids).issubset(allowed):
+                raise ActionRejected("Chunk ID is outside this Reader task's source scope.")
+            return self._chunks(allowed if ids is None else ids)
+        return self._chunks(ids)
 
     def _evidence(self) -> list[Evidence]:
         pinned = {eid for c in self.state.claims + self.proposals for eid in c.evidence_ids}
@@ -561,7 +665,7 @@ class AutonomousCoordinator:
         context["assignment"] = task.model_dump()
         context["available_chunks"] = [
             {"id": c.id, "filename": c.filename, "page": c.page, "section": c.section}
-            for c in self._chunks()
+            for c in self._task_chunks(task)
         ]
         if task.role == "retrieval":
             context["aspects"] = [a.model_dump() for a in self.plan.aspects]
@@ -570,7 +674,7 @@ class AutonomousCoordinator:
                 for c in self._chunks()
             ]
         elif task.role == "reader":
-            context["source_units"] = source_units(self._chunks(self.inspected.get(task.id)))
+            context["source_units"] = source_units(self._task_chunks(task))
         elif task.role in {"summarizer", "fact_checker"}:
             context["evidence"] = [e.model_dump(exclude={"regions"}) for e in self._evidence()]
             context["claims"] = [c.model_dump() for c in self.proposals]
@@ -598,9 +702,7 @@ class AutonomousCoordinator:
                     reason="Search the fixed corpus in the offline demo.",
                 )
         elif task.role == "reader":
-            result = self.reader._extract(
-                self.request.question, self._chunks(task.chunk_ids or None)
-            )
+            result = self.reader._extract(self.request.question, self._task_chunks(task))
         elif task.role == "summarizer":
             result = SynthesisOutput(
                 claims=[
@@ -664,18 +766,17 @@ class AutonomousCoordinator:
                 raise ActionRejected("The global retrieval limit has been reached.")
             self.searches += 1
             self.state.rounds = self.searches
+            generation, expected = task.generation, self._task_version(task)
             plan, chunks, notes = await self.retrieval.run(
-                self.request,
+                self.request.model_copy(deep=True),
                 [],
-                self.plan,
+                self.plan.model_copy(deep=True),
                 set(task.requirement_ids) or None,
                 set(self.state.retrieved),
                 queries_override=args.queries,
                 mode_override=args.search_mode or self.request.retrieval_mode,
             )
-            self.state.warnings.extend(notes)
-            self._remember_chunks(chunks)
-            return {
+            observation: dict[str, object] = {
                 "queries": plan.queries,
                 "chunks": [
                     {"id": c.id, "filename": c.filename, "snippet": c.text[:320]} for c in chunks
@@ -684,8 +785,15 @@ class AutonomousCoordinator:
                 "search_diagnostics": getattr(self.retrieval.search, "diagnostics", lambda: {})(),
             }
 
+            def publish() -> dict[str, object]:
+                self._remember_chunks(chunks)
+                self.state.warnings.extend(notes)
+                return observation
+
+            return await self._commit_action(task, generation, expected, publish)
+
         async def read(args: ToolArguments) -> dict[str, object]:
-            chunks = self._chunks(args.chunk_ids or None)
+            chunks = self._task_chunks(task, args.chunk_ids or None)
             if task.role == "reader":
                 self.inspected[task.id] = list(
                     dict.fromkeys([c.id for c in chunks] + self.inspected.get(task.id, []))
@@ -695,31 +803,41 @@ class AutonomousCoordinator:
         async def expand(args: ToolArguments) -> dict[str, object]:
             if not args.chunk_ids:
                 raise ActionRejected("Choose real observed chunk IDs to open context.")
-            chunks = self._chunks(args.chunk_ids)
+            chunks = [c.model_copy(deep=True) for c in self._task_chunks(task, args.chunk_ids)]
+            generation, expected = task.generation, self._task_version(task)
             method = getattr(self.retrieval.search, "expand_context", None)
             if method:
-                chunks = await method(chunks, self.request.document_ids)
-            self._remember_chunks(chunks)
-            self.inspected[task.id] = list(
-                dict.fromkeys([c.id for c in chunks] + self.inspected.get(task.id, []))
-            )[:12]
-            return {"source_units": source_units(self._chunks([c.id for c in chunks]))}
+                chunks = await method(chunks, list(self.request.document_ids))
+
+            def publish() -> dict[str, object]:
+                self._remember_chunks(chunks)
+                self.inspected[task.id] = list(
+                    dict.fromkeys([c.id for c in chunks] + self.inspected.get(task.id, []))
+                )[:12]
+                return {"source_units": source_units(self._chunks([c.id for c in chunks]))}
+
+            return await self._commit_action(task, generation, expected, publish)
 
         async def open_source(args: ToolArguments, method_name: str) -> dict[str, object]:
             if not args.chunk_ids:
                 raise ActionRejected("Choose observed chunk IDs to open a source.")
-            seeds = self._chunks(args.chunk_ids)
+            seeds = [c.model_copy(deep=True) for c in self._task_chunks(task, args.chunk_ids)]
+            generation, expected = task.generation, self._task_version(task)
             method = getattr(self.retrieval.search, method_name, None)
             if method is None:
                 raise ActionRejected("The search adapter does not support this source operation.")
-            chunks = await method(seeds, self.request.document_ids)
-            if not chunks:
-                return {"source_units": []}
-            self._remember_chunks(chunks)
-            self.inspected[task.id] = list(
-                dict.fromkeys([c.id for c in chunks] + self.inspected.get(task.id, []))
-            )[:12]
-            return {"source_units": source_units(self._chunks([c.id for c in chunks]))}
+            chunks = await method(seeds, list(self.request.document_ids))
+
+            def publish() -> dict[str, object]:
+                if not chunks:
+                    return {"source_units": []}
+                self._remember_chunks(chunks)
+                self.inspected[task.id] = list(
+                    dict.fromkeys([c.id for c in chunks] + self.inspected.get(task.id, []))
+                )[:12]
+                return {"source_units": source_units(self._chunks([c.id for c in chunks]))}
+
+            return await self._commit_action(task, generation, expected, publish)
 
         async def evidence(args: ToolArguments) -> dict[str, object]:
             lookup = {e.id: e for e in self._evidence()}
@@ -875,14 +993,14 @@ class AutonomousCoordinator:
         }
         return [tools[name] for name in [*allowed[task.role], "send_feedback", "inspect_feedback"]]
 
-    async def _accept_search(self, result: SearchCompletion, _: RuntimeTask) -> None:
+    def _accept_search(self, result: SearchCompletion, _: RuntimeTask) -> None:
         if not set(result.chunk_ids).issubset(self.state.retrieved):
             raise ActionRejected("Retrieval may finish with observed chunk IDs only.")
         self.active_chunks = list(dict.fromkeys(result.chunk_ids))
         self.retrieval_done = True
 
-    async def _accept_read(self, result: ReaderOutput, task: RuntimeTask) -> None:
-        chunks = self._chunks(self.inspected.get(task.id))
+    def _accept_read(self, result: ReaderOutput, task: RuntimeTask) -> None:
+        chunks = self._task_chunks(task)
         evidence, gaps, notes = self.reader.validate_output(
             self.request.question,
             chunks,
@@ -891,9 +1009,24 @@ class AutonomousCoordinator:
         )
         if result.evidence and not evidence:
             raise ActionRejected("No selected evidence has a valid exact source unit or quote.")
-        ledger = {(e.document_id, e.page, e.quote): e for e in self.evidence}
+        versions = getattr(self.retrieval.search, "source_versions", {})
+        evidence = [
+            item.model_copy(
+                update={"document_version": versions.get(item.document_id, "")}
+            )
+            for item in evidence
+        ]
+        def source_identity(item: Evidence) -> str:
+            return fingerprint(
+                [
+                    item.document_id, item.document_version, item.page,
+                    item.start, item.end, item.quote,
+                ]
+            )
+
+        ledger = {source_identity(e): e for e in self.evidence}
         for e in evidence:
-            key = (e.document_id, e.page, e.quote)
+            key = source_identity(e)
             previous = ledger.get(key)
             ledger[key] = (
                 previous.model_copy(
@@ -906,7 +1039,7 @@ class AutonomousCoordinator:
                 if previous
                 else e
             )
-        fresh = {(e.document_id, e.page, e.quote) for e in evidence}
+        fresh = {source_identity(e) for e in evidence}
         candidate_evidence = [e for key, e in ledger.items() if key in fresh]
         candidate_evidence += [e for key, e in ledger.items() if key not in fresh]
         if len(candidate_evidence) > 96:
@@ -920,7 +1053,7 @@ class AutonomousCoordinator:
         self.state.report_layout = None
         self.writer_done = False
 
-    async def _accept_synthesis(self, result: SynthesisOutput, task: RuntimeTask) -> None:
+    def _accept_synthesis(self, result: SynthesisOutput, task: RuntimeTask) -> None:
         if self.read_revision != self.source_revision:
             raise ActionRejected("Reader must inspect the current source context before synthesis.")
         requirements = requirements_for(self.planned)
@@ -962,7 +1095,7 @@ class AutonomousCoordinator:
         self.state.report_layout = None
         self.writer_done = False
 
-    async def _accept_check(self, result: FactCheckOutput, task: RuntimeTask) -> None:
+    def _accept_check(self, result: FactCheckOutput, task: RuntimeTask) -> None:
         if not self.synthesis_done or self.draft_revision != self.source_revision:
             raise ActionRejected("Current sources need Reader/Summarizer work before verification.")
         requirements = requirements_for(self.planned)
@@ -982,7 +1115,6 @@ class AutonomousCoordinator:
         self.state.gaps = gap_messages(gaps, requirements, self.request.language)
         self.checked_revision, self.checker_done = self.artifact_revision, True
         self.state.report_layout, self.writer_done = None, False
-        await self.state.save_checkpoint()
         # Preserve this verified snapshot even if the repair hits the global budget.
         # One feedback opportunity per artifact avoids silently completing after a
         # structural downgrade, without repeatedly spending calls on the same draft.
@@ -1042,7 +1174,7 @@ class AutonomousCoordinator:
                 "specialist to repair the claim. Do not repeat the unchanged supported verdict."
             )
 
-    async def _accept_layout(self, result: WriterOutput, _: RuntimeTask) -> None:
+    def _accept_layout(self, result: WriterOutput, _: RuntimeTask) -> None:
         if not self.checker_done or self.checked_revision != self.artifact_revision:
             raise ActionRejected(
                 "Writer cannot publish a layout against an unchecked artifact version."

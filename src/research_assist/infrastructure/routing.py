@@ -11,8 +11,8 @@ from typing import Literal
 import httpx
 from pydantic import ValidationError
 
-from research_assist.config import AgentRole, AgentRoute, Settings
-from research_assist.domain.errors import ProviderUnavailable
+from research_assist.config import AgentRole, AgentRoute, Settings, TargetName
+from research_assist.domain.errors import ProviderUnavailable, ResearchError
 from research_assist.domain.metadata import EVIDENCE_POLICY
 from research_assist.domain.models import AgentUsage
 from research_assist.domain.ports import LanguageModel, T
@@ -97,6 +97,63 @@ class ModelRouter:
         self.name = next(iter(providers)) if len(providers) == 1 else "mixed"
         if len({m.model for m in self.models.values()}) > 1:
             self.model = "per-agent routes"
+        self.target_routes: dict[str, Settings] = {
+            "demo": settings.model_copy(
+                update={
+                    "llm_provider": "demo",
+                    "llm_model": "extractive-demo",
+                    "gemini_fallback_model": "",
+                }
+            )
+        }
+        self.target_models: dict[str, LanguageModel] = {"demo": DemoLanguageModel()}
+        for name, target in settings.execution_targets.items():
+            updates: dict[str, object] = {
+                "llm_provider": target.provider,
+                "llm_model": target.model,
+                "gemini_fallback_model": "",
+                "agent_routes": {},
+            }
+            if target.provider != "ollama":
+                updates[f"{target.provider}_api_key"] = target.api_key
+            if target.provider != "gemini":
+                updates[f"{target.provider}_base_url"] = target.base_url.rstrip("/")
+            route = settings.model_copy(update=updates)
+            self.target_routes[name] = route
+            gate = gates.setdefault(target.provider, RequestGate(settings.llm_requests_per_minute))
+            self.target_models[name] = HTTPLanguageModel(route, client, gate)
+
+    def selected_target(self, role: AgentRole) -> TargetName:
+        usage = current_usage.get()
+        return usage.agent_targets.get(role, "default") if usage else "default"
+
+    def uses_demo_only(self) -> bool:
+        return all(self.selected_route(role)[0].name == "demo" for role in self.models)
+
+    def selected_route(self, role: AgentRole) -> tuple[LanguageModel, Settings]:
+        target = self.selected_target(role)
+        if target == "default":
+            return self.models[role], self.routes[role]
+        if target not in self.target_models:
+            raise ResearchError(f"Execution target '{target}' chưa được cấu hình trên server.")
+        return self.target_models[target], self.target_routes[target]
+
+    def public_targets(self) -> list[dict[str, object]]:
+        """Configuration availability is not a live health or hardware assertion."""
+        targets: list[dict[str, object]] = [
+            {"id": "default", "configured": True, "provider": self.name, "model": self.model}
+        ]
+        for name in ("demo", "api", "cpu", "gpu"):
+            model = self.target_models.get(name)
+            targets.append(
+                {
+                    "id": name,
+                    "configured": model is not None,
+                    "provider": model.name if model else None,
+                    "model": model.model if model else None,
+                }
+            )
+        return targets
 
     def public_routes(self) -> list[dict[str, object]]:
         return [
@@ -117,6 +174,9 @@ class ModelRouter:
 
     def execution(self, role: AgentRole) -> Literal["local", "api", "demo"]:
         usage = current_usage.get()
+        model, _ = self.selected_route(role)
+        if self.selected_target(role) != "default":
+            return "demo" if model.name == "demo" else "api"
         profile = usage.profile if usage and usage.profile else self.settings.workflow_profile
         orchestration = (
             usage.orchestration_mode
@@ -141,7 +201,7 @@ class ModelRouter:
         fallback: Callable[[], T],
     ) -> T:
         role = TASK_ROLES[task]
-        model, route = self.models[role], self.routes[role]
+        model, route = self.selected_route(role)
         mode = self.execution(role)
         if task in {"question_plan", "retrieval_action"} or task.endswith(("_step", "_brief")):
             mode = "demo" if model.name == "demo" else "api"
@@ -206,7 +266,9 @@ class ModelRouter:
                         return value
                     except ValidationError:
                         pass
-            secondary_model = self.fallback_models.get(role)
+            secondary_model = (
+                self.fallback_models.get(role) if self.selected_target(role) == "default" else None
+            )
             unavailable = (model.name, model.model)
             skip_primary = bool(
                 secondary_model and usage and unavailable in usage.unavailable_models
@@ -292,7 +354,11 @@ class ModelRouter:
                 if mode == "api" and entry.models_used:
                     entry.model = " → ".join(entry.models_used)
                 entry.elapsed_ms += round((time.perf_counter() - begin) * 1000, 2)
-                prices = self.settings.agent_routes.get(role, AgentRoute())
+                prices = (
+                    self.settings.agent_routes.get(role, AgentRoute())
+                    if self.selected_target(role) == "default"
+                    else AgentRoute()
+                )
                 if mode != "api" or (hit and entry.calls == 0):
                     entry.estimated_cost_usd = 0.0
                 elif (

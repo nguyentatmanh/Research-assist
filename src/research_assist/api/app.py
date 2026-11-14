@@ -5,14 +5,14 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import FastAPI, File, Header, Request, UploadFile
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.base import RequestResponseEndpoint
@@ -28,6 +28,15 @@ from research_assist.application.embedding_settings import (
     probe_endpoint,
     settings_path,
 )
+from research_assist.application.execution_settings import (
+    EditableTarget,
+    TargetInput,
+    load_targets,
+    persist_targets,
+    public_target_config,
+    updated_target,
+)
+from research_assist.application.target_probe import probe_model
 from research_assist.bootstrap import Container, build_container
 from research_assist.config import Settings
 from research_assist.domain.errors import (
@@ -38,9 +47,12 @@ from research_assist.domain.errors import (
     ResearchError,
 )
 from research_assist.domain.metadata import EVIDENCE_POLICY
-from research_assist.domain.models import ResearchRequest
+from research_assist.domain.models import Document, Evidence, ResearchRequest
 from research_assist.domain.ports import DiagnosticReranker
+from research_assist.domain.provenance import evidence_source_hash
 from research_assist.infrastructure.arxiv import ArxivLibrary, Paper
+from research_assist.infrastructure.crossref import CrossrefLibrary
+from research_assist.infrastructure.routing import ModelRouter
 
 
 class LoginBody(BaseModel):
@@ -50,6 +62,7 @@ class LoginBody(BaseModel):
 
 class PaperQuery(BaseModel):
     query: str = Field(min_length=3, max_length=300)
+    source: Literal["arxiv", "crossref"] = "arxiv"
 
 
 class PaperSelection(BaseModel):
@@ -72,10 +85,11 @@ def _create_app(settings: Settings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         nonlocal settings
-        settings = load_saved_settings(original_settings)
+        settings = load_targets(load_saved_settings(original_settings))
         container = build_container(settings)
         app.state.container = container
         app.state.arxiv = ArxivLibrary(container.client)
+        app.state.crossref = CrossrefLibrary(container.client)
         try:
             if settings.warmup_embedding:
                 try:
@@ -129,6 +143,14 @@ def _create_app(settings: Settings) -> FastAPI:
                 "connect-src 'self'; font-src 'self'; frame-ancestors 'none'; "
                 "base-uri 'none'; form-action 'self'"
             )
+        if path == "/":
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; script-src 'self'; "
+                "style-src 'self' https://fonts.googleapis.com; style-src-attr 'unsafe-inline'; "
+                "img-src 'self' data: blob:; connect-src 'self'; "
+                "font-src 'self' https://fonts.gstatic.com; frame-src blob:; "
+                "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+            )
         if path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
@@ -146,7 +168,7 @@ def _create_app(settings: Settings) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> Response:
-        if request.url.path.startswith("/api/embedding/remote"):
+        if request.url.path.startswith(("/api/embedding/remote", "/api/config/targets")):
             # Do not echo submitted API keys through Pydantic's input diagnostics.
             return JSONResponse({"detail": "Dữ liệu cấu hình GPU không hợp lệ."}, status_code=422)
         return await request_validation_exception_handler(request, exc)
@@ -222,7 +244,9 @@ def _create_app(settings: Settings) -> FastAPI:
         container = deps(request)
         async with embedding_config_lock:
             require_idle(container)
-            candidate = original_settings.model_copy(deep=True)
+            candidate = original_settings.model_copy(
+                update={"execution_targets": settings.execution_targets}, deep=True
+            )
             container.configure_embeddings(candidate)
             settings_path(original_settings).unlink(missing_ok=True)
             settings = candidate
@@ -290,6 +314,7 @@ def _create_app(settings: Settings) -> FastAPI:
             "autonomous_parallelism": settings.autonomous_parallelism,
             "autonomous_team_planning": settings.autonomous_team_planning,
             "agent_routes": container.router.public_routes(),
+            "execution_targets": container.router.public_targets(),
             "cache_enabled": settings.cache_enabled,
             "llm_max_calls": settings.llm_max_calls,
             "chunk_strategy": settings.chunk_strategy,
@@ -317,6 +342,57 @@ def _create_app(settings: Settings) -> FastAPI:
                 else "code scheduling with typed evidence feedback",
             },
         }
+
+    @app.get("/api/config/targets")
+    async def target_configuration(request: Request) -> dict[str, object]:
+        return {"targets": public_target_config(deps(request).settings)}
+
+    @app.put("/api/config/targets/{target}")
+    async def save_target(
+        target: EditableTarget, body: TargetInput, request: Request
+    ) -> dict[str, object]:
+        nonlocal settings
+        container = deps(request)
+        async with embedding_config_lock:
+            require_idle(container)
+            candidate = updated_target(settings, target, body)
+            router = ModelRouter(candidate, container.client, container.repository)
+            # No await between idle guard, persistence and swap: submissions cannot interleave.
+            persist_targets(candidate)
+            container.configure_models(candidate, router)
+            settings = candidate
+            return {"targets": public_target_config(settings)}
+
+    @app.delete("/api/config/targets/{target}")
+    async def restore_target(target: EditableTarget, request: Request) -> dict[str, object]:
+        nonlocal settings
+        container = deps(request)
+        async with embedding_config_lock:
+            require_idle(container)
+            if target in settings.managed_execution_targets:
+                raise ResearchError("Đích này do boot quản lý.")
+            targets = dict(settings.execution_targets)
+            if target in original_settings.execution_targets:
+                targets[target] = original_settings.execution_targets[target]
+            else:
+                targets.pop(target, None)
+            candidate = settings.model_copy(update={"execution_targets": targets}, deep=True)
+            router = ModelRouter(candidate, container.client, container.repository)
+            persist_targets(candidate)
+            container.configure_models(candidate, router)
+            settings = candidate
+            return {"targets": public_target_config(settings)}
+
+    @app.post("/api/config/targets/{target}/test")
+    async def test_target(target: str, request: Request) -> dict[str, object]:
+        container = deps(request)
+        if target == "default":
+            route = container.router.routes["retrieval"]
+        elif target in container.router.target_routes:
+            route = container.router.target_routes[target]
+        else:
+            raise NotFoundError("Execution target chưa được cấu hình.")
+        return await probe_model(route, container.client)
 
     @app.post("/api/cache/clear")
     async def clear_cache(request: Request) -> dict[str, int]:
@@ -370,8 +446,42 @@ def _create_app(settings: Settings) -> FastAPI:
 
     @app.post("/api/papers/search")
     async def find_papers(body: PaperQuery, request: Request) -> list[Paper]:
+        if body.source == "crossref":
+            crossref: CrossrefLibrary = request.app.state.crossref
+            return await crossref.search(body.query)
         library: ArxivLibrary = request.app.state.arxiv
         return await library.search(body.query)
+
+    @app.post("/api/scout/search")
+    async def scout_search(body: PaperQuery, request: Request) -> dict[str, object]:
+        outcomes = await asyncio.gather(
+            request.app.state.arxiv.search(body.query),
+            request.app.state.crossref.search(body.query),
+            return_exceptions=True,
+        )
+        papers, warnings, seen = [], [], set()
+        for provider, outcome in zip(("arxiv", "crossref"), outcomes, strict=True):
+            if isinstance(outcome, BaseException):
+                warnings.append(f"{provider}: chưa lấy được kết quả, hãy thử lại sau.")
+                continue
+            for paper in outcome:
+                key = " ".join(paper.title.casefold().split())
+                if key in seen:
+                    continue
+                seen.add(key)
+                papers.append(
+                    {
+                        **paper.model_dump(),
+                        "provider": provider,
+                        "arxiv_id": paper.paper_id if provider == "arxiv" else None,
+                        "year": int(paper.published[:4]) if paper.published[:4].isdigit() else None,
+                    }
+                )
+        return {
+            "papers": papers,
+            "warnings": warnings,
+            "policy": "Metadata dùng để tìm bài. Chọn và nhập toàn văn để nghiên cứu.",
+        }
 
     @app.post("/api/papers/import", status_code=201)
     async def import_paper(body: PaperSelection, request: Request) -> dict[str, object]:
@@ -514,6 +624,71 @@ def _create_app(settings: Settings) -> FastAPI:
         )
         return Response(png, media_type="image/png")
 
+    def source_for_preview(
+        request: Request, document_id: str, run_id: str | None, evidence_id: str | None
+    ) -> tuple[Document, Path, Evidence | None]:
+        repository = deps(request).repository
+        document = repository.document(document_id)
+        path = repository.blob(document_id)
+        if run_id is None and evidence_id is None:
+            return document, path, None
+        if not run_id or not evidence_id:
+            raise DocumentError("Cần chỉ rõ phiên và trích dẫn để đánh dấu tài liệu nguồn.")
+        record = repository.run(run_id)
+        evidence = (
+            next(
+                (item for item in record.result.evidence if item.id == evidence_id),
+                None,
+            )
+            if record.result
+            else None
+        )
+        if evidence is None or evidence.document_id != document_id:
+            raise NotFoundError("Không tìm thấy trích dẫn trong tài liệu này.")
+        snapshot = next((doc for doc in record.scope_documents if doc.id == document_id), None)
+        if snapshot and snapshot.sha256 != document.sha256:
+            raise DocumentError("Tệp gốc đã thay đổi so với bản được trích dẫn.")
+        if evidence.source_hash and evidence.source_hash != evidence_source_hash(evidence):
+            raise DocumentError("Vị trí trích dẫn không còn khớp với thông tin đã lưu.")
+        return document, path, evidence
+
+    @app.get("/api/documents/{document_id}/pages/{page_number}/preview")
+    async def preview_page(
+        document_id: str,
+        page_number: int,
+        request: Request,
+        run_id: str | None = None,
+        evidence_id: str | None = None,
+    ) -> Response:
+        document, path, evidence = source_for_preview(request, document_id, run_id, evidence_id)
+        if document.kind != "pdf":
+            raise DocumentError("Tài liệu này không có trang PDF.")
+        if evidence is not None and evidence.page != page_number:
+            raise DocumentError("Trang không khớp với trích dẫn đã lưu.")
+        from research_assist.infrastructure.source_preview import render_page
+
+        data, highlight, focus = await asyncio.to_thread(
+            render_page, path, document, page_number, evidence, settings.max_upload_mb * 1024 * 1024
+        )
+        headers = {"X-Source-Highlight": highlight}
+        if focus is not None:
+            headers["X-Source-Focus-Y"] = f"{focus:.6f}"
+        return Response(data, media_type="image/png", headers=headers)
+
+    @app.get("/api/documents/{document_id}/text")
+    async def source_text(
+        document_id: str,
+        request: Request,
+        run_id: str | None = None,
+        evidence_id: str | None = None,
+    ) -> dict[str, object]:
+        document, path, evidence = source_for_preview(request, document_id, run_id, evidence_id)
+        if document.kind not in {"txt", "md", "docx"}:
+            raise DocumentError("Chế độ xem văn bản hỗ trợ TXT, Markdown và DOCX.")
+        from research_assist.infrastructure.source_preview import preview_text
+
+        return await asyncio.to_thread(preview_text, path, document, evidence, settings)
+
     @app.post("/api/runs", status_code=202)
     async def create_run(body: ResearchRequest, request: Request) -> dict[str, object]:
         container = deps(request)
@@ -572,10 +747,33 @@ def _create_app(settings: Settings) -> FastAPI:
             headers={"Content-Disposition": f'attachment; filename="research-{run_id}.{format}"'},
         )
 
+    @app.get("/api/runs/{run_id}/methodology")
+    async def methodology(run_id: str, request: Request) -> dict[str, object]:
+        from research_assist.application.methodology import methodology_checklist
+
+        run = deps(request).repository.run(run_id)
+        if not run.result:
+            raise ResearchError("Phiên chưa có bằng chứng để kiểm tra.")
+        return methodology_checklist(run.result.evidence)
+
     app.mount("/assets", StaticFiles(directory=web), name="assets")
 
     @app.get("/")
     async def index() -> FileResponse:
         return FileResponse(web / "index.html")
+
+    @app.get("/demo2", include_in_schema=False)
+    @app.get("/demo2/", include_in_schema=False)
+    async def legacy_workspace() -> RedirectResponse:
+        return RedirectResponse("/", status_code=308)
+
+    @app.get("/desk")
+    async def desk() -> FileResponse:
+        return FileResponse(web / "desk.html")
+
+    @app.get("/studio")
+    @app.get("/studio/")
+    async def studio() -> FileResponse:
+        return FileResponse(web / "studio.html")
 
     return app

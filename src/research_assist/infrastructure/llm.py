@@ -17,7 +17,7 @@ from urllib.parse import quote
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from research_assist.config import Settings
+from research_assist.config import AgentRole, Settings, TargetName
 from research_assist.domain.errors import (
     BudgetExceeded,
     ProviderError,
@@ -44,6 +44,7 @@ class Usage:
     unavailable_models: set[tuple[str, str]] = field(default_factory=set)
     reserved_tokens: int = 0
     strict_reservations: bool = False
+    agent_targets: dict[AgentRole, TargetName] = field(default_factory=dict)
 
 
 current_usage: ContextVar[Usage | None] = ContextVar("research_usage", default=None)
@@ -80,9 +81,13 @@ def usage_scope(
     profile: str | None = None,
     cache_enabled: bool = True,
     orchestration_mode: str | None = None,
+    agent_targets: dict[AgentRole, TargetName] | None = None,
 ) -> Iterator[Usage]:
     usage = Usage(
-        profile=profile, cache_allowed=cache_enabled, orchestration_mode=orchestration_mode
+        profile=profile,
+        cache_allowed=cache_enabled,
+        orchestration_mode=orchestration_mode,
+        agent_targets=dict(agent_targets or {}),
     )
     token = current_usage.set(usage)
     try:

@@ -1,16 +1,34 @@
 """Offline HTTP integration: real runtime decisions, peer dependencies and factual guards."""
 
+import asyncio
 import json
 from collections import Counter
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from pydantic import SecretStr
 
-from research_assist.application.autonomous import merge_source_candidates
+from research_assist.agents.reader import ReaderAgent
+from research_assist.application.autonomous import AutonomousCoordinator, merge_source_candidates
+from research_assist.application.research_state import ResearchState
+from research_assist.application.task_graph import TaskGraph
 from research_assist.bootstrap import build_container
-from research_assist.domain.errors import ProviderError
-from research_assist.domain.models import ResearchRequest, RetrievedChunk
+from research_assist.domain.errors import ActionRejected, ProviderError
+from research_assist.domain.models import (
+    AgentSession,
+    PeerMessage,
+    QuestionAspect,
+    QuestionPlan,
+    RawEvidence,
+    ReaderOutput,
+    ResearchRequest,
+    RetrievalPlan,
+    RetrievedChunk,
+    RuntimeTask,
+    SearchCompletion,
+    ToolArguments,
+)
 
 
 def decision(action, **kwargs):
@@ -674,31 +692,30 @@ async def test_date_translation_survives_autonomous_tools_checks_and_report(sett
     assert not provider.feedback and result.llm_calls == 9
 
 
-@pytest.mark.parametrize("repair", [False, True])
-async def test_structural_downgrade_gets_one_feedback_opportunity(settings, repair):
-    provider = GuardProvider(repair=repair)
+async def test_structural_downgrade_schedules_bounded_evidence_repair(settings):
+    provider = GuardProvider()
     result = await run_autonomous(settings, provider, max_calls=24)
-    assert len(provider.feedback) == 1
+    assert not provider.feedback
     assert "99%" not in result.markdown
     assert result.reported_claim_ids
-    if repair:
-        assert len(provider.summary_jobs) == 2
-        assert result.stop_reason == "requirements_covered"
-    else:
-        assert len(provider.summary_jobs) == 2
-        checker = next(s for s in result.agent_sessions if s.role == "fact_checker")
-        assert checker.steps == 3 and checker.status == "completed"
-        assert result.coverage[0].status == "covered"
-        assert any(t.role == "retrieval" and t.requirement_ids for t in result.task_graph)
+    assert len(provider.summary_jobs) == 2
+    assert result.stop_reason == "requirements_covered"
+    checker = next(s for s in result.agent_sessions if s.role == "fact_checker")
+    assert checker.steps == 2 and checker.status == "completed"
+    assert any(
+        t.role == "summarizer" and t.requested_by == "fact_checker" and t.claim_ids
+        for t in result.task_graph
+    )
 
 
-async def test_last_local_step_keeps_partial_snapshot_without_retry(settings):
+async def test_last_local_step_can_schedule_bounded_deterministic_repair(settings):
     settings.agent_max_steps = 2
     provider = GuardProvider()
     result = await run_autonomous(settings, provider)
     assert not provider.feedback and result.llm_calls <= 12
     assert result.reported_claim_ids and "99%" not in result.markdown
-    assert result.coverage[0].status != "covered"
+    assert result.coverage[0].status == "covered"
+    assert len(provider.summary_jobs) == 2
 
 
 async def test_feedback_global_budget_keeps_verified_snapshot(settings):
@@ -707,3 +724,222 @@ async def test_feedback_global_budget_keeps_verified_snapshot(settings):
     assert result.llm_calls == 9
     assert result.reported_claim_ids and "99%" not in result.markdown
     assert any(c.verdict == "insufficient" for c in result.checks)
+
+
+def tool_coordinator(chunk):
+    """A populated run at the point independent tool actions are ready to execute."""
+    coordinator = AutonomousCoordinator(
+        None, SimpleNamespace(search=SimpleNamespace()), None, None, None, None, 3, 16, 24
+    )
+    coordinator.request = ResearchRequest(
+        question="Explain RAG evidence", document_ids=[chunk.document_id]
+    )
+    coordinator.planned = coordinator.request
+    coordinator.plan = QuestionPlan(aspects=[QuestionAspect(text="RAG evidence", query="RAG")])
+    coordinator.state = ResearchState(retrieved={chunk.id: chunk.model_copy(deep=True)})
+    coordinator.graph = TaskGraph(coordinator.state.task_graph, 24)
+    coordinator.active_chunks = [chunk.id]
+    coordinator.inspected = {}
+    coordinator.evidence, coordinator.proposals, coordinator.candidate_gaps = [], [], []
+    coordinator.source_revision = coordinator.artifact_revision = 0
+    coordinator.checked_revision = coordinator.read_revision = coordinator.draft_revision = -1
+    coordinator.searches = 0
+    coordinator.reader_done = coordinator.synthesis_done = coordinator.checker_done = False
+    coordinator.writer_done = coordinator.retrieval_done = False
+    coordinator._active = True
+    coordinator._commit_lock = asyncio.Lock()
+    coordinator._corpus_fingerprint = "frozen-test-corpus"
+    coordinator.event = lambda *args, **kwargs: None
+
+    async def step(agent, message, work, describe=None):
+        return await work
+
+    coordinator.step = step
+    return coordinator
+
+
+async def test_independent_tools_overlap_without_holding_commit_lock(chunk):
+    coordinator = tool_coordinator(chunk)
+    entered, ready = set(), asyncio.Event()
+
+    async def barrier(name):
+        assert not coordinator._commit_lock.locked()
+        entered.add(name)
+        if len(entered) == 2:
+            ready.set()
+        await asyncio.wait_for(ready.wait(), 2)
+
+    async def search(*args, **kwargs):
+        await barrier("search")
+        return RetrievalPlan(queries=["RAG"]), [chunk], ["search committed"]
+
+    async def section(*args):
+        await barrier("section")
+        return [chunk]
+
+    class Decisions:
+        def __init__(self):
+            self.seen = set()
+
+        async def generate(self, **kwargs):
+            task_id = kwargs["payload"]["task_id"]
+            if task_id in self.seen:
+                return kwargs["schema"].model_validate(decision("blocked"))
+            self.seen.add(task_id)
+            tool, arguments = (
+                ("search", {"queries": ["RAG"]})
+                if kwargs["task"] == "retrieval_step"
+                else ("read_section", {"chunk_ids": [chunk.id]})
+            )
+            return kwargs["schema"].model_validate(
+                decision("use_tool", tool=tool, arguments=arguments)
+            )
+
+    async def finish(result):
+        raise AssertionError("This fixture exercises tools only.")
+
+    coordinator.llm = Decisions()
+    coordinator.retrieval.run = search
+    coordinator.retrieval.search.read_section = section
+    tasks = [
+        RuntimeTask(id=role, role=role, instruction="Inspect the scoped sources.", status="running")
+        for role in ("retrieval", "reader")
+    ]
+    coordinator.inspected["reader"] = [chunk.id]
+    sessions = [AgentSession(task_id=t.id, role=t.role) for t in tasks]
+    await asyncio.wait_for(
+        asyncio.gather(
+            *[
+                coordinator._run_worker(
+                    task, session, SearchCompletion, finish, lambda request: "unused", lambda: None
+                )
+                for task, session in zip(tasks, sessions, strict=True)
+            ]
+        ),
+        3,
+    )
+    assert entered == {"search", "section"}
+    assert coordinator.state.warnings == ["search committed"]
+    assert all(not any(o["kind"] == "rejected" for o in s.observations) for s in sessions)
+
+
+@pytest.mark.parametrize("invalidate", ["source_edit", "generation", "cancelled"])
+async def test_late_source_result_cannot_publish_after_invalidation(chunk, invalidate):
+    coordinator = tool_coordinator(chunk)
+    task = RuntimeTask(
+        id="reader", role="reader", instruction="Inspect this source only.", status="running"
+    )
+    coordinator.inspected[task.id] = [chunk.id]
+    entered, release = asyncio.Event(), asyncio.Event()
+    returned = chunk.model_copy(update={"id": "late_chunk"})
+
+    async def section(seeds, scope):
+        # The adapter receives private models, not mutable run-owned source objects.
+        seeds[0].text = "Mutated adapter input must remain private."
+        entered.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            pass  # A misbehaving adapter must not be able to publish after cancellation.
+        return [returned]
+
+    coordinator.retrieval.search.read_section = section
+    tool = next(t for t in coordinator._worker_tools(task) if t.name == "read_section")
+    future = asyncio.create_task(tool.execute(ToolArguments(chunk_ids=[chunk.id])))
+    await asyncio.wait_for(entered.wait(), 2)
+    assert coordinator.state.retrieved[chunk.id].text == chunk.text
+    if invalidate == "source_edit":
+        coordinator.state.retrieved[chunk.id].text = chunk.text.replace("50", "60")
+    elif invalidate == "generation":
+        task.generation += 1
+    else:
+        future.cancel()
+    release.set()
+    error = asyncio.CancelledError if invalidate == "cancelled" else ActionRejected
+    with pytest.raises(error):
+        await asyncio.wait_for(future, 2)
+    assert returned.id not in coordinator.state.retrieved
+    assert coordinator.inspected[task.id] == [chunk.id]
+
+
+async def test_reader_cannot_inspect_another_task_chunk_and_feedback_is_content_hashed(chunk):
+    coordinator = tool_coordinator(chunk)
+    foreign = chunk.model_copy(update={"id": "other_branch"})
+    coordinator.state.retrieved[foreign.id] = foreign
+    coordinator.active_chunks.append(foreign.id)
+    task = RuntimeTask(
+        id="reader", role="reader", instruction="Read only assigned evidence.",
+        chunk_ids=[chunk.id], status="running",
+    )
+    coordinator.inspected[task.id] = [chunk.id]
+    tools = {tool.name: tool for tool in coordinator._worker_tools(task)}
+    with pytest.raises(ActionRejected, match="source scope"):
+        await tools["read_units"].execute(ToolArguments(chunk_ids=[foreign.id]))
+    assert [c["id"] for c in coordinator._context(task)["available_chunks"]] == [chunk.id]
+    coordinator.state.peer_messages.append(
+        PeerMessage(id="msg_1", sender="writer", recipient="reader", message="Inspect the methods.")
+    )
+    before = coordinator._task_version(task)
+    coordinator.state.peer_messages[0].message = "Inspect the limitations."
+    assert coordinator._task_version(task) != before
+
+
+async def test_verified_checkpoint_io_releases_commit_lock_even_during_repair(chunk):
+    coordinator = tool_coordinator(chunk)
+    task = RuntimeTask(
+        id="checker", role="fact_checker", instruction="Verify the current draft.", status="running"
+    )
+    session = AgentSession(task_id=task.id, role=task.role)
+    saved, published = [], []
+
+    def accept(result, task):
+        published.append(result)
+        coordinator.state.checks = []  # Replaces the verified snapshot at the same draft revision.
+        coordinator.checked_revision = 1
+        if len(published) == 1:
+            raise ActionRejected("Repair a verdict after preserving its safe snapshot.")
+
+    async def checkpoint():
+        assert not coordinator._commit_lock.locked()
+        async with coordinator._commit_lock:
+            saved.append(coordinator.checked_revision)
+        await asyncio.sleep(0)  # Represents external persistence, outside the commit section.
+
+    async def runtime(task, session, output, finish, child, handoff):
+        with pytest.raises(ActionRejected, match="Repair a verdict"):
+            await finish(SearchCompletion())
+        await finish(SearchCompletion())
+
+    coordinator.state.checkpoint = checkpoint
+    coordinator._run_worker = runtime
+    await asyncio.wait_for(
+        coordinator._worker(task, session, SearchCompletion, accept, lambda request: "unused"),
+        2,
+    )
+    assert saved == [1, 1]
+
+
+async def test_identical_quotes_at_distinct_source_offsets_keep_separate_provenance(chunk):
+    coordinator = tool_coordinator(chunk)
+    coordinator.reader = ReaderAgent(None)
+    coordinator.retrieval.search.source_versions = {chunk.document_id: "frozen-version"}
+    repeated = chunk.model_copy(
+        update={"id": "repeated_chunk", "start": chunk.start + 200, "end": chunk.end + 200}
+    )
+    coordinator.state.retrieved[repeated.id] = repeated
+    task = RuntimeTask(id="reader", role="reader", instruction="Read both source locations.")
+    coordinator.inspected[task.id] = [chunk.id, repeated.id]
+    quote = "RAG combines retrieval with generation."
+    output = ReaderOutput(
+        evidence=[
+            RawEvidence(chunk_id=c.id, quote=quote, relevance="Grounded source evidence.")
+            for c in (chunk, repeated)
+        ]
+    )
+    coordinator._accept_read(output, task)
+    coordinator._accept_read(output, task)  # The same source spans still deduplicate on reread.
+    assert len(coordinator.evidence) == 2
+    assert {e.start for e in coordinator.evidence} == {chunk.start, repeated.start}
+    assert len({e.id for e in coordinator.evidence}) == 2
+    assert len({e.source_hash for e in coordinator.evidence}) == 2
+    assert all(e.document_version == "frozen-version" for e in coordinator.evidence)

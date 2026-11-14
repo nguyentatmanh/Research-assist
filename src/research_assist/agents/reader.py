@@ -10,7 +10,7 @@ from research_assist.domain.models import (
     RetrievedChunk,
 )
 from research_assist.domain.ports import LanguageModel
-from research_assist.domain.provenance import intersect_regions
+from research_assist.domain.provenance import evidence_source_hash, intersect_regions
 from research_assist.domain.source_units import source_units
 from research_assist.domain.text import fold, tokens
 
@@ -232,6 +232,8 @@ class ReaderAgent:
                 "các nhận định vẫn cần Fact Checker xác nhận."
             )
         warnings.extend(rejection_notes)
+        for item_evidence in evidence:
+            item_evidence.source_hash = evidence_source_hash(item_evidence)
         return evidence, raw.gaps, warnings
 
     def _extract(self, question: str, chunks: list[RetrievedChunk]) -> ReaderOutput:

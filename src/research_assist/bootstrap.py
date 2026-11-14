@@ -41,6 +41,19 @@ class Container:
         await self.runs.close()
         await self.client.aclose()
 
+    def configure_models(self, settings: Settings, router: ModelRouter) -> None:
+        """Only while idle; one atomic swap, with no network await."""
+        self.settings, self.router = settings, router
+        self.documents.settings = settings
+        self.runs.settings = settings
+        pipeline = self.runs.pipeline
+        pipeline.llm = router
+        pipeline.retrieval.llm = router
+        pipeline.reader.llm = router
+        pipeline.summarizer.llm = router
+        pipeline.checker.llm = router
+        pipeline.writer.llm = router
+
     def configure_embeddings(self, settings: Settings) -> None:
         """Caller must ensure no run or document operation is active; no await during swap."""
         embedder = build_embedder(settings, self.client)
