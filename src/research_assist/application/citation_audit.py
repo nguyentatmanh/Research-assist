@@ -106,9 +106,7 @@ def audit_citations(
 def published_citation_audit(audit: CitationAudit, claim_ids: list[str]) -> CitationAudit:
     published = set(claim_ids)
     accepted = [claim_id for claim_id in audit.accepted_claim_ids if claim_id in published]
-    status = (
-        "passed" if accepted else "failed" if audit.rejected_claim_ids else "not_applicable"
-    )
+    status = "passed" if accepted else "failed" if audit.rejected_claim_ids else "not_applicable"
     return audit.model_copy(update={"status": status, "accepted_claim_ids": accepted})
 
 

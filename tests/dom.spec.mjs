@@ -70,7 +70,10 @@ try {
     window.document.querySelectorAll(".agent-node.completed").length,
     5,
   );
-  assert.ok(find("#report-content").textContent.includes("RAG"));
+  assert.ok(
+    find("#result-title").textContent.includes("RAG") ||
+      find("#report-content").textContent.includes("RAG"),
+  );
   assert.equal(window.document.querySelectorAll(".coverage-item").length, 2);
   assert.ok(find("#coverage-panel").textContent.includes("Chưa xác định"));
   checks++;

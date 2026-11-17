@@ -132,10 +132,7 @@ class AutonomousCoordinator:
                 request.model_dump(),
                 planned.model_dump(),
                 plan.model_dump(),
-                [
-                    chunk.model_dump(exclude={"vector"})
-                    for _, chunk in sorted(frozen.items())
-                ],
+                [chunk.model_dump(exclude={"vector"}) for _, chunk in sorted(frozen.items())],
             ]
         )
         try:
@@ -551,9 +548,7 @@ class AutonomousCoordinator:
                     )
 
             try:
-                await self._commit_action(
-                    task, task.generation, self._task_version(task), publish
-                )
+                await self._commit_action(task, task.generation, self._task_version(task), publish)
             finally:
                 # Verification can deliberately reject a verdict after recording the
                 # safe snapshot for repair. Persist that snapshot without locking I/O.
@@ -630,9 +625,7 @@ class AutonomousCoordinator:
             raise ActionRejected("Chunk ID is not in this run's observed source scope.")
         return [self.state.retrieved[cid] for cid in keys][:12]
 
-    def _task_chunks(
-        self, task: RuntimeTask, ids: list[str] | None = None
-    ) -> list[RetrievedChunk]:
+    def _task_chunks(self, task: RuntimeTask, ids: list[str] | None = None) -> list[RetrievedChunk]:
         allowed = self.inspected.get(task.id, task.chunk_ids or self.active_chunks)
         if task.role == "reader":
             if ids is not None and not set(ids).issubset(allowed):
@@ -1011,16 +1004,19 @@ class AutonomousCoordinator:
             raise ActionRejected("No selected evidence has a valid exact source unit or quote.")
         versions = getattr(self.retrieval.search, "source_versions", {})
         evidence = [
-            item.model_copy(
-                update={"document_version": versions.get(item.document_id, "")}
-            )
+            item.model_copy(update={"document_version": versions.get(item.document_id, "")})
             for item in evidence
         ]
+
         def source_identity(item: Evidence) -> str:
             return fingerprint(
                 [
-                    item.document_id, item.document_version, item.page,
-                    item.start, item.end, item.quote,
+                    item.document_id,
+                    item.document_version,
+                    item.page,
+                    item.start,
+                    item.end,
+                    item.quote,
                 ]
             )
 

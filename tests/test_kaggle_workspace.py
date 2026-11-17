@@ -141,4 +141,3 @@ def test_kaggle_deployment_package(tmp_path, monkeypatch):
     exec(compile("".join(cell["source"]), cell["id"], "exec"), {})
     assert calls == [["bash", "kaggle/boot.sh", "--mode", "workspace"]]
     assert (root / "kaggle/boot.sh").read_bytes() == boot_sh
-

@@ -131,6 +131,7 @@ try {
     .getByRole("checkbox", { name: "Chọn nguồn safe-display.txt", exact: true })
     .check();
   await page.locator("#scope-dialog .primary-button").click();
+  await page.fill("#requirements", "");
   await page.fill(
     "#question",
     "Explain the RAG evidence in this research document.",

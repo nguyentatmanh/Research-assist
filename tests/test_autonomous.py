@@ -868,8 +868,11 @@ async def test_reader_cannot_inspect_another_task_chunk_and_feedback_is_content_
     coordinator.state.retrieved[foreign.id] = foreign
     coordinator.active_chunks.append(foreign.id)
     task = RuntimeTask(
-        id="reader", role="reader", instruction="Read only assigned evidence.",
-        chunk_ids=[chunk.id], status="running",
+        id="reader",
+        role="reader",
+        instruction="Read only assigned evidence.",
+        chunk_ids=[chunk.id],
+        status="running",
     )
     coordinator.inspected[task.id] = [chunk.id]
     tools = {tool.name: tool for tool in coordinator._worker_tools(task)}
