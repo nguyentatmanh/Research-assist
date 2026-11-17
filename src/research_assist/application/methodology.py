@@ -12,7 +12,7 @@ PATTERNS = {
     "seeds": r"\b(?:seeds?|random states?|hạt giống)\b",
     "uncertainty": r"(?:±|confidence interval|standard deviation|độ lệch chuẩn|khoảng tin cậy)",
     "test": r"(?:p\s*[<=>]\s*0\.\d+|wilcoxon|bootstrap|paired t.test)",
-    "sample_size": r"(?:\bn\s*=\s*\d+|\b\d+\s*(?:samples|examples|questions|mẫu))",
+    "sample_size": r"(?:\bn\s*=\s*\d+|\b\d+\s*(?:samples|examples|questions|mẫu|câu)\b)",
     "hardware": r"\b(?:GPU|CPU|T4|A100|H100|V100|VRAM|compute budget)\b",
     "limitations": r"\b(?:limitations?|hạn chế|future work)\b",
 }

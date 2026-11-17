@@ -83,7 +83,9 @@ class RunManager:
                 run.status, run.updated_at = "running", now()
                 self.repository.save_run(run)
                 async with asyncio.timeout(self.settings.run_timeout_seconds):
-                    run.result = await self.pipeline.run(run.id, run.request, emit, checkpoint)
+                    run.result = await self.pipeline.run(
+                        run.id, run.request, emit, checkpoint, scope_documents=run.scope_documents
+                    )
                 run.status = "completed"
         except asyncio.CancelledError:
             run.status = "cancelled"

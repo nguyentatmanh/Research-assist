@@ -36,6 +36,7 @@ from research_assist.application.execution_settings import (
     public_target_config,
     updated_target,
 )
+from research_assist.application.literature_scout import ScoutCache, merge_scout_papers
 from research_assist.application.target_probe import probe_model
 from research_assist.bootstrap import Container, build_container
 from research_assist.config import Settings
@@ -52,6 +53,7 @@ from research_assist.domain.ports import DiagnosticReranker
 from research_assist.domain.provenance import evidence_source_hash
 from research_assist.infrastructure.arxiv import ArxivLibrary, Paper
 from research_assist.infrastructure.crossref import CrossrefLibrary
+from research_assist.infrastructure.openalex import OpenAlexLibrary, normalize_doi
 from research_assist.infrastructure.routing import ModelRouter
 
 
@@ -62,7 +64,7 @@ class LoginBody(BaseModel):
 
 class PaperQuery(BaseModel):
     query: str = Field(min_length=3, max_length=300)
-    source: Literal["arxiv", "crossref"] = "arxiv"
+    source: Literal["arxiv", "crossref", "openalex"] = "arxiv"
 
 
 class PaperSelection(BaseModel):
@@ -90,6 +92,14 @@ def _create_app(settings: Settings) -> FastAPI:
         app.state.container = container
         app.state.arxiv = ArxivLibrary(container.client)
         app.state.crossref = CrossrefLibrary(container.client)
+        app.state.openalex = OpenAlexLibrary(
+            container.client, settings.openalex_api_key.get_secret_value()
+        )
+        scout_cache = ScoutCache(
+            ttl_seconds=settings.cache_ttl_seconds if settings.cache_enabled else 0,
+            max_entries=min(settings.cache_max_entries, 256),
+        )
+        app.state.scout_cache = scout_cache
         try:
             if settings.warmup_embedding:
                 try:
@@ -100,6 +110,7 @@ def _create_app(settings: Settings) -> FastAPI:
                     )
             yield
         finally:
+            await scout_cache.close()
             await container.close()
 
     app = FastAPI(title="Research Assist · Five-Agent RAG", version=__version__, lifespan=lifespan)
@@ -444,41 +455,47 @@ def _create_app(settings: Settings) -> FastAPI:
     async def documents(request: Request) -> dict[str, object]:
         return {"documents": [d.model_dump() for d in deps(request).repository.documents()]}
 
+    async def search_papers(request: Request, source: str, query: str) -> list[Paper]:
+        library: ArxivLibrary | CrossrefLibrary | OpenAlexLibrary = getattr(
+            request.app.state, source
+        )
+        cache: ScoutCache = request.app.state.scout_cache
+        papers = await cache.search(source, query, library.search)
+        if isinstance(library, ArxivLibrary):
+            # Cached hits can outlive the smaller list of recently selected versions.
+            library.remember(papers)
+        return papers
+
     @app.post("/api/papers/search")
     async def find_papers(body: PaperQuery, request: Request) -> list[Paper]:
-        if body.source == "crossref":
-            crossref: CrossrefLibrary = request.app.state.crossref
-            return await crossref.search(body.query)
-        library: ArxivLibrary = request.app.state.arxiv
-        return await library.search(body.query)
+        return await search_papers(request, body.source, body.query)
 
     @app.post("/api/scout/search")
     async def scout_search(body: PaperQuery, request: Request) -> dict[str, object]:
+        requested_doi = normalize_doi(body.query)
+        providers = (("arxiv", "arxiv"), ("crossref", "crossref"), ("openalex", "OpenAlex"))
         outcomes = await asyncio.gather(
-            request.app.state.arxiv.search(body.query),
-            request.app.state.crossref.search(body.query),
+            *(search_papers(request, provider, body.query) for provider, _ in providers),
             return_exceptions=True,
         )
-        papers, warnings, seen = [], [], set()
-        for provider, outcome in zip(("arxiv", "crossref"), outcomes, strict=True):
+        papers: list[Paper] = []
+        warnings: list[str] = []
+        for (provider, label), outcome in zip(providers, outcomes, strict=True):
             if isinstance(outcome, BaseException):
-                warnings.append(f"{provider}: chưa lấy được kết quả, hãy thử lại sau.")
+                if not isinstance(outcome, Exception):
+                    raise outcome
+                warnings.append(f"{label}: chưa lấy được kết quả, hãy thử lại sau.")
                 continue
-            for paper in outcome:
-                key = " ".join(paper.title.casefold().split())
-                if key in seen:
-                    continue
-                seen.add(key)
-                papers.append(
-                    {
-                        **paper.model_dump(),
-                        "provider": provider,
-                        "arxiv_id": paper.paper_id if provider == "arxiv" else None,
-                        "year": int(paper.published[:4]) if paper.published[:4].isdigit() else None,
-                    }
-                )
+            papers.extend(
+                paper.model_copy(update={"source": provider})
+                for paper in outcome
+                # OpenAlex looks up the DOI directly and can return its canonical alias.
+                if not requested_doi
+                or provider == "openalex"
+                or normalize_doi(paper.doi or "") == requested_doi
+            )
         return {
-            "papers": papers,
+            "papers": merge_scout_papers(papers),
             "warnings": warnings,
             "policy": "Metadata dùng để tìm bài. Chọn và nhập toàn văn để nghiên cứu.",
         }

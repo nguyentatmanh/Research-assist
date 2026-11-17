@@ -24,6 +24,7 @@ from research_assist.domain.metadata import EVIDENCE_POLICY
 from research_assist.domain.models import (
     AgentEvent,
     AgentUsage,
+    Document,
     Evidence,
     EvidenceGap,
     QuestionPlan,
@@ -107,6 +108,8 @@ class ResearchPipeline:
         request: ResearchRequest,
         emit: EventSink,
         on_checkpoint: Callable[[ResearchResult], None] | None = None,
+        *,
+        scope_documents: list[Document] | None = None,
     ) -> ResearchResult:
         started = time.perf_counter()
         state = ResearchState()
@@ -236,6 +239,7 @@ class ResearchPipeline:
                     state.gap_details,
                     deterministic=True,
                     user_requirements=request.requirements,
+                    scope_documents=scope_documents,
                 )
                 # Deep copy: subsequent worker mutations must not alter a saved checkpoint.
                 saved = ResearchResult(
@@ -325,11 +329,16 @@ class ResearchPipeline:
             )
             planned_request = request
             state.coverage = validate_coverage(requirements_for(request), [], [])
+            planning_sources = (
+                {"sources": scope_documents}
+                if mode == "autonomous" and scope_documents and 2 <= len(scope_documents) <= 24
+                else {}
+            )
             try:
                 question_plan = await step(
                     "retrieval",
                     "Phân tích các ý cần trả lời.",
-                    self.retrieval.prepare(request),
+                    self.retrieval.prepare(request, **planning_sources),
                     lambda p: {
                         "stage": "question_planning",
                         "aspects": [a.model_dump() for a in p.aspects],
@@ -352,6 +361,7 @@ class ResearchPipeline:
                         self.parallel_task_retries,
                         self.parallel_task_max_calls,
                         self.parallel_task_max_tokens,
+                        scope_documents=scope_documents,
                     )
                     await parallel.run(planned_request, question_plan, state, step, event)
                 elif mode == "autonomous":
@@ -422,6 +432,7 @@ class ResearchPipeline:
                         or state.stop_reason in {"budget_exhausted", "provider_error"},
                         layout=state.report_layout if mode == "autonomous" else None,
                         user_requirements=request.requirements,
+                        scope_documents=scope_documents,
                     ),
                     lambda v: {
                         "written_claims": len(v.claim_ids),
@@ -448,6 +459,7 @@ class ResearchPipeline:
                         state.gap_details,
                         deterministic=True,
                         user_requirements=request.requirements,
+                        scope_documents=scope_documents,
                     ),
                 )
             requirements = requirements_for(planned_request)

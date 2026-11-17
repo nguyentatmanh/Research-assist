@@ -6,7 +6,7 @@ fan out; synthesis/checking/writing retain their factual dependencies.
 
 import asyncio
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from research_assist.agents.fact_checker import FactCheckerAgent
 from research_assist.agents.reader import ReaderAgent
@@ -25,7 +25,7 @@ from research_assist.application.task_execution import (
     TaskExecutor,
     fingerprint,
 )
-from research_assist.application.task_graph import TaskGraph
+from research_assist.application.task_graph import TERMINAL, TaskGraph
 from research_assist.domain.coverage import (
     gap_messages,
     reconcile_gaps,
@@ -43,6 +43,7 @@ from research_assist.domain.models import (
     AgentSession,
     Claim,
     ClaimEvidenceLink,
+    Document,
     Evidence,
     EvidenceUsage,
     FollowUpRequest,
@@ -61,14 +62,26 @@ from research_assist.domain.models import (
 from research_assist.infrastructure.llm import current_task_budget, current_usage
 
 
+class _ReaderOptions(TypedDict, total=False):
+    requests: list[FollowUpRequest]
+    cover_documents: bool
+
+
 class ScopedSources:
     """A capability for one execution; no task may read the run-wide chunk pool."""
 
     def __init__(
-        self, search: Any, scope: TaskScope, budget: TaskBudget, reserve: Callable[[], None]
+        self,
+        search: Any,
+        scope: TaskScope,
+        budget: TaskBudget,
+        reserve: Callable[[], None],
+        *,
+        cover_documents: bool = False,
     ) -> None:
         self.search_tool, self.scope, self.budget = search, scope, budget
         self.reserve = reserve
+        self.cover_documents = cover_documents
         self.observed: dict[str, RetrievedChunk] = {}
         self.expansions: list[TaskScope] = []
 
@@ -106,7 +119,20 @@ class ScopedSources:
         if set(document_ids) != set(self.scope.allowed_document_ids):
             raise ActionRejected("Search attempted to change document scope.")
         self.reserve()
-        chunks, warnings = await self.search_tool.search(queries, document_ids, top_k, mode)
+        if self.cover_documents:
+            per_document = (top_k + len(document_ids) - 1) // len(document_ids)
+            ranked = await asyncio.gather(
+                *(
+                    self.search_tool.search(queries, [document_id], per_document, mode)
+                    for document_id in document_ids
+                )
+            )
+            chunks = [lane[i] for i in range(per_document) for lane, _ in ranked if i < len(lane)][
+                :top_k
+            ]
+            warnings = list(dict.fromkeys(warning for _, notes in ranked for warning in notes))
+        else:
+            chunks, warnings = await self.search_tool.search(queries, document_ids, top_k, mode)
         for chunk in chunks:
             self.validate(chunk)
             self.observed[chunk.id] = chunk.model_copy(deep=True)
@@ -188,11 +214,14 @@ class ParallelResearchCoordinator:
         retries: int = 1,
         task_calls: int = 6,
         task_tokens: int = 20000,
+        *,
+        scope_documents: list[Document] | None = None,
     ) -> None:
         self.retrieval, self.reader, self.summarizer = retrieval, reader, summarizer
         self.checker, self.writer = checker, writer
         self.parallelism, self.max_tasks, self.max_steps = parallelism, max_tasks, max_steps
         self.retries, self.task_calls, self.task_tokens = retries, task_calls, task_tokens
+        self.scope_documents = scope_documents
         self.executor = TaskExecutor()
         self.chunks: dict[str, dict[str, RetrievedChunk]] = {}
         self.sources: dict[str, list[RetrievedChunk]] = {}
@@ -204,6 +233,7 @@ class ParallelResearchCoordinator:
         self.repair_limited = False
         self.reader_call_allowance = task_calls
         self.search_requests: dict[str, FollowUpRequest] = {}
+        self.early_tasks: set[str] = set()
         self.repair_readers: set[str] = set()
         self.staged_evidence: dict[str, tuple[list[Evidence], list[EvidenceUsage]]] = {}
         self.draft_sources: dict[str, tuple[list[Evidence], list[EvidenceUsage]]] = {}
@@ -320,6 +350,7 @@ class ParallelResearchCoordinator:
                     future.result()  # Global budget and programming failures stop the run.
                     if completed.role == "fact_checker" and completed.status == "completed":
                         self.schedule_revision(completed, writer, dispatched)
+                self.schedule_early_reads(summary, dispatched)
             state.stop_reason = (
                 (
                     "requirements_covered"
@@ -336,6 +367,90 @@ class ParallelResearchCoordinator:
             for future in running:
                 future.cancel()
             await asyncio.gather(*running, return_exceptions=True)
+
+    def schedule_early_reads(self, summary: RuntimeTask, dispatched: int) -> None:
+        """Give an empty first Reader one focused follow-up before the initial join."""
+        if summary.status != "pending" or self.request.max_rounds < 2:
+            return
+        tasks = self.state.task_graph
+        budgets = self.state.research_tasks
+        empty_readers = []
+        for index, reader_id in enumerate(summary.depends_on):
+            reader = tasks[reader_id]
+            if reader.status != "completed" or budgets[reader_id].evidence_ids:
+                continue
+            retrieval_id = reader.depends_on[0]
+            if (
+                retrieval_id not in self.search_requests
+                and budgets[retrieval_id].budget.search_calls < self.request.max_rounds
+            ):
+                empty_readers.append((index, reader))
+        if not empty_readers:
+            return
+
+        pending = sum(t.status in {"pending", "waiting"} for t in tasks.values())
+        slots = min(self.max_tasks - len(tasks), self.max_steps - dispatched - pending)
+        active = [t for t in tasks.values() if t.status not in TERMINAL]
+        search_reserved = sum(
+            budgets[t.id].budget.max_search_calls - budgets[t.id].budget.search_calls
+            for t in active
+            if t.role == "retrieval"
+        )
+        capacity = min(slots // 2, self.max_search_calls - self.search_calls - search_reserved)
+        remaining = self.remaining_calls()
+        if remaining is not None and self.model_call_cost("reader"):
+            reader_reserved = sum(
+                budgets[t.id].budget.max_model_calls - budgets[t.id].budget.model_calls
+                for t in active
+                if t.role == "reader"
+            )
+            final_calls = self.model_call_cost("summarizer") + self.model_call_cost("fact_checker")
+            capacity = min(capacity, remaining - reader_reserved - final_calls)
+        requirements = {r.id: r.text for r in requirements_for(self.request)}
+        for index, reader in empty_readers[: max(0, capacity)]:
+            rid = reader.requirement_ids[0]
+            seed = self.early_section_anchor(reader)
+            followup = FollowUpRequest(
+                action="read_context" if seed else "retrieve",
+                requirement_ids=[rid],
+                chunk_ids=[seed] if seed else [],
+                need=f"Find direct source evidence for this aspect: {requirements[rid]}"[:700],
+            )
+            search = self.add("retrieval", [rid], [reader.id], instruction=followup.need)
+            self.search_requests[search.id] = followup
+            budgets[search.id].budget.max_search_calls = 1
+            reread = self.add("reader", [rid], [search.id], instruction=followup.need)
+            budgets[reread.id].budget.max_model_calls = 1
+            self.early_tasks.update((search.id, reread.id))
+            summary.depends_on[index] = reread.id
+            summary.dependency_conditions.pop(reader.id)
+            summary.dependency_conditions[reread.id] = "ON_TERMINAL"
+            self.event(
+                "orchestrator",
+                "running",
+                "Đã lên lịch đọc bổ sung cho ý thiếu bằng chứng trước khi tổng hợp.",
+                requirement_id=rid,
+                followup=followup.model_dump(),
+            )
+
+    def early_section_anchor(self, reader: RuntimeTask) -> str | None:
+        frozen = getattr(self.search, "frozen_chunks", None)
+        if not frozen or not getattr(self.search, "read_section", None):
+            return None
+        windows = self.task_chunks(reader.id)
+        for seed in windows:
+            for chunk in frozen.values():
+                if (chunk.document_id, chunk.section) != (seed.document_id, seed.section):
+                    continue
+                if not any(
+                    window.document_id == chunk.document_id
+                    and window.page == chunk.page
+                    and window.start <= chunk.start
+                    and window.end >= chunk.end
+                    for window in windows
+                ):
+                    return seed.id
+        return None
 
     def schedule_revision(self, checker: RuntimeTask, writer: RuntimeTask, dispatched: int) -> None:
         """Treat the checker as a bounded critic; revisions must be checked again."""
@@ -475,12 +590,17 @@ class ParallelResearchCoordinator:
             ),
             requested_by,
         )
+        document_ids = self.request.document_ids
+        if role in {"retrieval", "reader"} and len(requirements) == 1:
+            aspect = self.plan.aspects[int(requirements[0].removeprefix("rq_")) - 1]
+            if aspect.document_ids and set(aspect.document_ids) <= set(document_ids):
+                document_ids = aspect.document_ids
         self.state.research_tasks[task.id] = ResearchTaskState(
             task_id=task.id,
             scope=TaskScope(
                 task_id=task.id,
                 requirement_ids=tuple(requirements),
-                allowed_document_ids=tuple(self.request.document_ids),
+                allowed_document_ids=tuple(document_ids),
             ),
             budget=TaskBudget(
                 max_search_calls=self.request.max_rounds,
@@ -609,8 +729,14 @@ class ParallelResearchCoordinator:
                         self.audit_now()
                         await self.state.save_checkpoint()
                     break
-                except BudgetExceeded:
-                    raise
+                except BudgetExceeded as exc:
+                    if task.id not in self.early_tasks:
+                        raise
+                    task.status, session.status = "failed", "failed"
+                    task.message = str(exc)
+                    local.warnings.append(str(exc))
+                    self.state.warnings.append(f"{task.id}: {exc}")
+                    break
                 except (ProviderError, ActionRejected) as exc:
                     if not self.executor.is_running(task):
                         session.status = "cancelled"
@@ -653,6 +779,14 @@ class ParallelResearchCoordinator:
 
     async def work(self, task: RuntimeTask, context: TaskExecutionContext) -> Any:
         local = self.state.research_tasks[task.id]
+        cover_documents = (
+            task.role in {"retrieval", "reader"}
+            and len(task.requirement_ids) == 1
+            and 1 < len(local.scope.allowed_document_ids) <= self.request.top_k
+            and bool(
+                self.plan.aspects[int(task.requirement_ids[0].removeprefix("rq_")) - 1].document_ids
+            )
+        )
         if task.role == "retrieval":
 
             def reserve() -> None:
@@ -663,7 +797,9 @@ class ParallelResearchCoordinator:
                 local.budget.search_calls += 1
                 self.search_calls += 1
 
-            scoped = ScopedSources(self.search, local.scope, local.budget, reserve)
+            scoped = ScopedSources(
+                self.search, local.scope, local.budget, reserve, cover_documents=cover_documents
+            )
             agent = RetrievalAgent(
                 self.retrieval.llm,
                 scoped,
@@ -675,6 +811,7 @@ class ParallelResearchCoordinator:
             requirement = requirements_for(self.request)[index]
             aspect = self.plan.aspects[index]
             followup = self.search_requests.get(task.id)
+            early = task.id in self.early_tasks
             if followup is not None and followup.action == "read_context":
                 anchors = {
                     c.id: c
@@ -694,14 +831,20 @@ class ParallelResearchCoordinator:
                     "Open the requested frozen source section.",
                     scoped.read_section(seeds),
                 )
+                if early:
+                    previous = {c.id for c in self.task_chunks(task.depends_on[0])}
+                    expanded.sort(key=lambda c: c.id in previous)
                 return (
                     RetrievalPlan(queries=[followup.need], facets=[requirement.text]),
                     expanded[: self.request.top_k],
                     [],
                 ), scoped.expansions
-            query = aspect.query
-            if followup is not None:
-                query += "\n" + followup.need
+            query_terms = [aspect.query]
+            if early or cover_documents:
+                query_terms.append(requirement.text)
+            if followup and not early:
+                query_terms.append(followup.need)
+            query = "\n".join(dict.fromkeys(query_terms))
             seen = (
                 {
                     cid
@@ -716,7 +859,8 @@ class ParallelResearchCoordinator:
             )
             request = self.request.model_copy(
                 update={
-                    "question": query + "\n" + self.request.question,
+                    "document_ids": list(local.scope.allowed_document_ids),
+                    "question": query,
                     "requirements": [requirement.text],
                 }
             )
@@ -729,12 +873,26 @@ class ParallelResearchCoordinator:
                     QuestionPlan(aspects=[aspect]),
                     seen_chunk_ids=seen,
                     queries_override=[request.question],
+                    cover_documents=cover_documents,
                 ),
             )
+            if early:
+                plan, chunks, warnings = result
+                earlier = {c.id: c for c in self.task_chunks(task.depends_on[0])}
+                result = (
+                    plan,
+                    [c for c in chunks if c.id not in earlier or c.text != earlier[c.id].text],
+                    warnings,
+                )
             return result, scoped.expansions
         if task.role == "reader":
             chunks = self.task_chunks(task.id, list(context.allowed_chunk_ids))
             followup = self.search_requests.get(task.depends_on[0])
+            options: _ReaderOptions = {}
+            if followup:
+                options["requests"] = [followup.model_copy(deep=True)]
+            if cover_documents:
+                options["cover_documents"] = True
             texts = [
                 requirements_for(self.request)[int(r.removeprefix("rq_")) - 1].text
                 for r in task.requirement_ids
@@ -746,7 +904,7 @@ class ParallelResearchCoordinator:
                     texts[0] + "\n" + self.request.question,
                     chunks,
                     texts,
-                    **({"requests": [followup.model_copy(deep=True)]} if followup else {}),
+                    **options,
                 ),
             )
         if task.role == "summarizer":
@@ -801,6 +959,7 @@ class ParallelResearchCoordinator:
             self.state.gaps,
             self.state.gap_details,
             deterministic=True,
+            scope_documents=self.scope_documents,
         )
         if task.id == self.audit_task_id:
             return audit_citations(

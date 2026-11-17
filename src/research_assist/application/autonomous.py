@@ -1100,7 +1100,9 @@ class AutonomousCoordinator:
             raise ActionRejected("Current sources need Reader/Summarizer work before verification.")
         requirements = requirements_for(self.planned)
         evidence = self._evidence()
-        validated = self.checker.validate_output(result, self.proposals, evidence, requirements)
+        validated = self.checker.validate_output(
+            result, self.proposals, evidence, requirements, question=self.request.question
+        )
         coverage, gaps = reconcile_gaps(
             requirements,
             validated.coverage,
