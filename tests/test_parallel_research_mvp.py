@@ -42,6 +42,7 @@ from research_assist.infrastructure.llm import (
     DemoLanguageModel,
     HTTPLanguageModel,
     current_task_budget,
+    current_usage,
     usage_scope,
 )
 from research_assist.infrastructure.search import NoReranker
@@ -182,6 +183,83 @@ async def run_team(team, state=None):
     with usage_scope():
         await team.run(request(), plan(), state, inline_step, lambda *a, **kw: None)
     return state
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["retrieve", "section", "unchanged", "outside", "steps", "rounds", "calls", "budget_error"],
+)
+async def test_empty_reader_can_retry_once_before_initial_synthesis(case, monkeypatch):
+    first = source("Alpha", text="Research Alpha reviewed the experiment background.")
+    better = source(
+        "Alpha",
+        start=200,
+        text="Research Alpha found direct supporting evidence in the experiment.",
+    ).model_copy(update={"id": "ch_Alpha_detail", "ordinal": 1})
+    beta = source("Beta")
+
+    class RetrySearch(Search):
+        async def search(self, queries, document_ids, top_k, mode):
+            assert document_ids == request().document_ids
+            alpha = "Alpha" in queries[0].splitlines()[0]
+            branch = "Alpha" if alpha else "Beta"
+            self.calls.append(branch)
+            if not alpha:
+                return [beta], []
+            if self.calls.count(branch) == 1 or case == "unchanged":
+                return [first], []
+            if case == "budget_error" and self.calls.count(branch) == 2:
+                raise BudgetExceeded("Early retry could not reserve its budget.")
+            if case == "outside":
+                return [better.model_copy(update={"document_id": "doc_outside"})], []
+            return [better], []
+
+        async def read_section(self, seeds, document_ids):
+            assert [chunk.id for chunk in seeds] == [first.id]
+            assert document_ids == request().document_ids
+            self.calls.append("Alpha")
+            return [first, better]
+
+    search = RetrySearch()
+    if case == "section":
+        search.frozen_chunks = {c.id: c for c in (first, better, beta)}
+    team, _ = coordinator(search, retries=0, max_steps=8 if case == "steps" else 32)
+    first_join = []
+
+    class EmptyReader(Reader):
+        async def run(self, question, chunks, requirements=None, requests=None):
+            if case == "calls":
+                current_usage.get().calls += 1
+            if requirements == ["Research Alpha findings"] and not requests:
+                return [], ["Evidence is missing for Alpha."], []
+            return await super().run(question, chunks, requirements, requests)
+
+    class Summary(SummarizerAgent):
+        async def run(self, question, evidence, language, requirements=None, requests=None):
+            first_join.append((list(search.calls), {item.chunk_id for item in evidence}))
+            return await super().run(question, evidence, language, requirements, requests)
+
+    team.reader = EmptyReader(DemoLanguageModel(), search)
+    team.summarizer = Summary(DemoLanguageModel())
+    if case == "calls":
+        # Two mandatory Reader calls and two verification calls fit, but a retry does not.
+        monkeypatch.setattr(team, "remaining_calls", lambda: 4 - current_usage.get().calls)
+        monkeypatch.setattr(team, "model_call_cost", lambda role: 1)
+    req = request().model_copy(update={"max_rounds": 1 if case == "rounds" else 2})
+    state = ResearchState()
+    with usage_scope():
+        await team.run(req, plan(), state, inline_step, lambda *a, **kw: None)
+    calls_at_join, inputs = first_join[0]
+    assert calls_at_join.count("Alpha") == (1 if case in {"steps", "rounds", "calls"} else 2)
+    assert calls_at_join.count("Beta") == 1
+    assert beta.id in inputs
+    if case in {"retrieve", "section"}:
+        assert better.id in inputs
+        assert len(first_join) == 1 and state.rounds == 1
+    else:
+        assert inputs == {beta.id}
+    assert all(item.document_id in req.document_ids for item in state.evidence)
+    assert state.citation_audit.status == "passed"
 
 
 async def test_search_overlap_and_reader_a_starts_before_retrieval_b_finishes():

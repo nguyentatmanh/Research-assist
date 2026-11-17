@@ -72,9 +72,7 @@ def data(tmp_path):
 
 
 def test_standalone_notebook_uses_reranker_workers_without_starting_them():
-    book = json.loads(
-        (ROOT / "notebooks/07_kaggle_finetune_qwen3_reranker_4b.ipynb").read_text("utf-8")
-    )
+    book = json.loads((ROOT / "notebooks/02_train_reranker.ipynb").read_text("utf-8"))
     assert len({cell["id"] for cell in book["cells"]}) == len(book["cells"])
     for cell in book["cells"]:
         if cell["cell_type"] == "code":

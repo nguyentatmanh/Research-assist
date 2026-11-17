@@ -86,7 +86,10 @@ try {
     paper.url,
   );
   assert.equal(await page.locator("#nav-doc-count").textContent(), "0");
-  const add = page.locator("#paper-results button");
+  const results = page.locator("#paper-results");
+  const add = results.getByRole("button", { name: /^Thêm vào kho/ });
+  const bibtex = results.getByRole("button", { name: /^Tải BibTeX/ });
+  assert.equal(await bibtex.count(), 1);
   await add.click();
   await page.waitForFunction(
     () =>
@@ -154,7 +157,8 @@ try {
     () =>
       document.querySelector("#paper-status").textContent === "Tìm được 1 bài.",
   );
-  assert.equal(await page.locator("#paper-results button").count(), 0);
+  assert.equal(await add.count(), 0);
+  assert.equal(await bibtex.count(), 1);
   assert.equal(
     await page.locator("#paper-results a").getAttribute("href"),
     "https://doi.org/" + encodeURIComponent(paper.doi),

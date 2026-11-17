@@ -1,6 +1,7 @@
 """Exercise standalone notebook serving code and the app adapter without a GPU/network."""
 
 import ast
+import io
 import json
 import zipfile
 from pathlib import Path
@@ -10,6 +11,7 @@ import numpy as np
 import pytest
 from pydantic import SecretStr, ValidationError
 
+from notebooks import kaggle_tunnel
 from notebooks.gpu_embedding_server import (
     checkpoint_identity,
     create_embedding_app,
@@ -159,22 +161,51 @@ def test_qwen_notebook_is_standalone_and_serving_opt_in():
     book = json.loads(path.read_text("utf-8"))
     assert book["nbformat"] == 4
     assert len({c["id"] for c in book["cells"]}) == len(book["cells"])
+    namespace = {}
     for cell in book["cells"]:
         if cell["cell_type"] == "code":
             assert cell["execution_count"] is None and cell["outputs"] == []
             ast.parse("".join(cell["source"]))
-    return
-    assert book["nbformat"] == 4
-    assert len({c["id"] for c in book["cells"]}) == len(book["cells"])
-    source = "\n".join("".join(c["source"]) for c in book["cells"] if c["cell_type"] == "code")
-    assert "START_GPU_SERVER = False" in source
-    assert "START_CLOUDFLARE = False" in source
-    assert "load_qwen_checkpoint" in source
-    assert 'family="qwen3"' in source
-    for cell in book["cells"]:
-        if cell["cell_type"] == "code":
-            assert cell["execution_count"] is None and cell["outputs"] == []
-            ast.parse("".join(cell["source"]))
+            if cell["id"] == "gpu-embedding-001":
+                exec("".join(cell["source"]), namespace)
+    if path.name == "03_gpu_server.ipynb":
+        assert namespace["START_GPU_SERVER"] is False
+        assert namespace["START_CLOUDFLARE"] is False
+        assert namespace["BASE_MODEL"] == "Qwen/Qwen3-Embedding-0.6B"
+
+
+@pytest.mark.parametrize("published", [True, False])
+def test_quick_tunnel_reaps_child_when_startup_fails(monkeypatch, tmp_path, published):
+    class Cloudflared:
+        def __init__(self):
+            self.stdout = io.StringIO(
+                "ready at https://research-test.trycloudflare.com\n" if published else ""
+            )
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = 0
+
+        def wait(self, timeout):
+            return self.returncode
+
+    child = Cloudflared()
+    monkeypatch.setattr(kaggle_tunnel, "find_cloudflared", lambda path: "mock-cloudflared")
+    monkeypatch.setattr(kaggle_tunnel.subprocess, "Popen", lambda *args, **kwargs: child)
+    if published:
+        assert kaggle_tunnel.start_quick_tunnel(8008, tmp_path) == (
+            child,
+            "https://research-test.trycloudflare.com",
+        )
+        assert child.poll() is None
+        kaggle_tunnel.stop_process(child)
+    else:
+        with pytest.raises(RuntimeError, match="before the tunnel was ready"):
+            kaggle_tunnel.start_quick_tunnel(8008, tmp_path)
+    assert child.poll() == 0
 
 
 async def test_server_authentication_model_binding_and_request_limits():

@@ -26,8 +26,8 @@ from notebooks.qwen_adapter_encoder import (
 ROOT = Path(__file__).parents[1]
 
 
-def test_notebook_standalone_library_does_not_start_worker(monkeypatch):
-    notebook = json.loads((ROOT / "notebooks/06_kaggle_finetune_qwen3_4b.ipynb").read_text("utf-8"))
+def test_notebook_standalone_library_does_not_start_worker():
+    notebook = json.loads((ROOT / "notebooks/01_train_embedding.ipynb").read_text("utf-8"))
     scope = {"__name__": "__main__"}
     for cell in notebook["cells"]:
         if cell["cell_type"] == "code":

@@ -290,11 +290,18 @@ def test_crossref_discovery_preserves_doi_date_precision_and_corpus(settings):
                 ).status_code
                 == 422
             )
+            api.app.state.crossref.next_search = float("inf")
+            repeated = api.post(
+                "/api/papers/search",
+                json={"query": "retrieval evidence", "source": "crossref"},
+            )
+            assert repeated.status_code == 200
+            assert repeated.json() == [paper]
             assert (
                 api.post(
                     "/api/papers/search",
                     json={
-                        "query": "retrieval evidence",
+                        "query": "another study",
                         "source": "crossref",
                     },
                 ).status_code

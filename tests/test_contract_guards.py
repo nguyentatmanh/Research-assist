@@ -5,7 +5,11 @@ import pytest
 from pydantic import ValidationError
 
 from research_assist.agents.fact_checker import FactCheckerAgent
-from research_assist.agents.policies.verification import numbers, validate_checks
+from research_assist.agents.policies.verification import (
+    numbers,
+    numeric_guard_reason,
+    validate_checks,
+)
 from research_assist.agents.writer import WriterAgent
 from research_assist.config import Settings
 from research_assist.domain.coverage import report_coverage, requirements_for, validate_coverage
@@ -369,3 +373,60 @@ async def test_oversized_prompt_is_rejected_before_any_http_request(settings: Se
                 fallback=lambda: RetrievalPlan(queries=["fallback"]),
             )
     assert not calls
+
+
+@pytest.mark.parametrize(
+    "claim,quote,accepted",
+    [
+        ("10 nghìn mẫu", "We used 10,000 samples.", True),
+        ("10,000 samples", "Nghiên cứu dùng 10 nghìn mẫu.", True),
+        ("1,5 triệu mẫu", "We used 1,500,000 samples.", True),
+        ("1.5M samples", "We used 1,500,000 samples.", True),
+        ("0,5 triệu mẫu", "We used 500,000 samples.", True),
+        ("1.5m samples", "We used 1,500,000 samples.", False),
+        ("2k sentences", "Bộ kiểm thử có 2000 câu.", True),
+        ("10 nghìn mẫu", "We used 10,000 sentences.", False),
+        ("10 nghìn mẫu", "We used 10 samples.", False),
+        ("10 mẫu", "We used 10 thousand samples.", False),
+        ("10 nghìn mẫu", "We used not 10,000 samples.", False),
+        ("10 nghìn mẫu", "The paper listed 10,000 as the method identifier.", False),
+        ("10.000 mẫu", "We used 10 thousand samples.", False),
+        ("10 nghìn mẫu", "Chúng tôi dùng 10.000 mẫu.", False),
+        ("10 nghìn mẫu và 10 MB", "We used 10 thousand samples and 50 MB.", False),
+        ("5 MB", "We used 5 GB.", False),
+        ("5 mẫu", "We used 50 samples.", False),
+    ],
+)
+def test_equivalent_counts_require_matching_scale_units_and_polarity(claim, quote, accepted):
+    assert (numeric_guard_reason(claim, [quote]) == "") is accepted
+
+
+@pytest.mark.parametrize(
+    "claim,quote,accepted",
+    [
+        ("Dùng 10 nghìn mẫu.", "We did not use 10,000 samples.", False),
+        ("Dùng 10 nghìn mẫu.", "We did not use all 10,000 samples.", False),
+        ("We used 10,000 samples.", "We did not use 10,000 samples.", False),
+        ("We used 10,000 samples.", "10,000 samples were not used.", False),
+        ("We used 10,000 samples.", "Chúng tôi không sử dụng 10 nghìn mẫu.", False),
+        ("Không dùng 10 nghìn mẫu.", "We didn't use 10,000 samples.", True),
+        ("Không dùng 10 nghìn mẫu.", "10,000 samples were not used.", True),
+        ("Không dùng 10 nghìn mẫu.", "We used 10,000 samples.", False),
+        ("Dùng 10 nghìn mẫu.", "We did not use 5,000 samples but used 10,000 samples.", True),
+        ("Dùng 10 nghìn mẫu.", "We used not only 10,000 samples but also 5,000 examples.", True),
+        ("Dùng 10 nghìn mẫu.", "We used no more than 10,000 samples.", False),
+        ("We used 10,000 samples.", "We used no more than 10,000 samples.", False),
+        ("We used 10,000.", "We used no more than 10,000 samples.", False),
+        ("Tối đa 10 nghìn mẫu.", "We used not more than 10,000 samples.", True),
+        ("Tối đa 10 nghìn mẫu.", "We used no more\nthan 10,000 samples.", True),
+        ("Tối đa 10 nghìn mẫu.", "We used 10,000 samples or fewer.", True),
+        ("Tối đa 10 nghìn mẫu.", "We used 10,000 samples.", False),
+        ("Dưới 10 nghìn mẫu.", "We used at most 10,000 samples.", False),
+        ("Ít nhất 10 nghìn mẫu.", "We used >= 10,000 samples.", True),
+        ("Ít nhất 10 nghìn mẫu.", "We used up to 10,000 samples.", False),
+        ("Khoảng 10 nghìn mẫu.", "We used roughly 10,000 samples.", True),
+        ("Dùng 10 nghìn mẫu.", "We used roughly 10,000 samples.", False),
+    ],
+)
+def test_count_comparisons_preserve_qualifiers(claim: str, quote: str, accepted: bool) -> None:
+    assert (numeric_guard_reason(claim, [quote]) == "") is accepted

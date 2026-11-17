@@ -1,3 +1,8 @@
+try:
+    import pyarrow  # noqa: F401  # Preload on Windows to avoid DLL conflict with torch/MKL
+except ImportError:
+    pass
+
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
