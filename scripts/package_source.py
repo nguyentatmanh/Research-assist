@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT_FILES = {
     ".dockerignore",
     ".env.example",
+    ".gitattributes",
     ".gitignore",
     "ARCHITECTURE.md",
     "DELIVERY_NOTES.md",
@@ -25,7 +26,17 @@ ROOT_FILES = {
     "pyproject.toml",
     "requirements-tested.txt",
 }
-SOURCE_DIRS = {".github", "configs", "docs", "examples", "notebooks", "scripts", "src", "tests"}
+SOURCE_DIRS = {
+    ".github",
+    "configs",
+    "docs",
+    "examples",
+    "kaggle",
+    "notebooks",
+    "scripts",
+    "src",
+    "tests",
+}
 EXCLUDED_DIRS = {"__pycache__", "node_modules", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 
 
@@ -42,7 +53,7 @@ def source_files(root: Path) -> list[Path]:
             )
             for filename in sorted(names):
                 path = Path(folder) / filename
-                if path.is_symlink() or path.suffix in {".pyc", ".pyo", ".env"}:
+                if path.is_symlink() or path.suffix in {".pyc", ".pyo", ".env", ".zip", ".log"}:
                     continue
                 if ".env." in filename and not filename.endswith(".env.example"):
                     continue
@@ -57,27 +68,22 @@ def source_files(root: Path) -> list[Path]:
 def package_source(root: Path, output: Path) -> int:
     root = root.resolve()
     files = source_files(root)
-    manifest = root / "SOURCE_MANIFEST.json"
-    manifest.write_text(
-        json.dumps(
-            {
-                "project": "Research Desk",
-                "algorithm": "sha256",
-                "files": {
-                    path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-                    for path in files
-                },
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    manifest = {
+        "project": "Research Assist",
+        "algorithm": "sha256",
+        "files": {
+            path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in files
+        },
+    }
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in [*files, manifest]:
+        for path in files:
             archive.write(path, "research-assist/" + path.relative_to(root).as_posix())
+        archive.writestr(
+            "research-assist/SOURCE_MANIFEST.json",
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        )
     return len(files) + 1
 
 

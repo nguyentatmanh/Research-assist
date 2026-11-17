@@ -230,9 +230,9 @@ def serve_cells():
     ]
 
 
-def write(name, cells):
+def write(name, cells, *, id_prefix="gpu-e5"):
     for index, value in enumerate(cells):
-        value["id"] = f"gpu-e5-{index:03d}"
+        value["id"] = f"{id_prefix}-{index:03d}"
         if value["cell_type"] == "code":
             value.update(execution_count=None, outputs=[])
     book = {

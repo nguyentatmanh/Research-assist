@@ -1,4 +1,4 @@
-"""Build notebook 07: Qwen3-Reranker-4B QLoRA using the official SWIFT BCE recipe."""
+"""Build notebook 02: Qwen3-Reranker-4B QLoRA using the official SWIFT BCE recipe."""
 
 import ast
 import json
@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 INTRO = """# Fine-tune Qwen3-Reranker-4B — Kaggle T4, QLoRA, phiên 12 giờ
 
-**Đây là notebook fine-tune reranker, file 07.** Chọn GPU T4, Internet ON, dùng
+Chọn GPU T4, bật Internet, dùng
 Save Version → Save & Run All trong một phiên mới. Model mặc định duy nhất là
 `Qwen/Qwen3-Reranker-4B`. Một GPU được dùng; T4 thứ hai không tự cộng VRAM.
 
@@ -169,10 +169,8 @@ reranker = load_reranker_adapter("/path/to/extracted/qwen3-reranker-adapter", de
 scores = reranker.score([("research question", "candidate passage")], batch_size=1)
 ```
 
-Đây là artifact **reranker**, có manifest/task riêng. Endpoint embedding trong
-notebook 05 nhận artifact embedding; không dán adapter reranker vào đó.
-Notebook này chưa triển khai API reranker/Cloudflare. Toàn bộ phiên Save & Run All
-kết thúc sau khi lưu kết quả train và evaluation.
+ZIP **reranker** có manifest riêng và hàm chấm điểm đi kèm. Phiên Save & Run All
+kết thúc sau khi lưu kết quả huấn luyện và đánh giá.
 """
 
 
@@ -267,7 +265,7 @@ if __name__ == "__main__":
             "accelerator": "GPU",
         },
     }
-    path = ROOT / "notebooks/07_kaggle_finetune_qwen3_reranker_4b.ipynb"
+    path = ROOT / "notebooks/02_train_reranker.ipynb"
     path.write_text(json.dumps(notebook, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(path)
 
