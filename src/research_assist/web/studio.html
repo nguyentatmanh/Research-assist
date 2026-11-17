@@ -6,8 +6,13 @@
     <title>Research Assist · Studio</title>
     <link rel="icon" href="/assets/favicon.svg" />
     <link rel="stylesheet" href="/assets/fonts.css" />
-    <link rel="stylesheet" href="/assets/studio.css" />
-    <script type="module" src="/assets/studio.js?v=verified-report-1"></script>
+    <link rel="stylesheet" href="/assets/studio.css?v=comparison-report-1" />
+    <link
+      rel="stylesheet"
+      href="/assets/report_table.css?v=research-exports-1"
+    />
+    <link rel="stylesheet" href="/assets/scout.css?v=research-exports-1" />
+    <script type="module" src="/assets/studio.js?v=research-exports-1"></script>
   </head>
   <body>
     <a class="skip" href="#question">Đến câu hỏi nghiên cứu</a>
@@ -50,20 +55,24 @@
           <p class="empty">Chưa có tài liệu.</p>
         </div>
         <details class="discovery">
-          <summary>Tìm bài báo · arXiv / Crossref</summary>
+          <summary>Tìm bài báo · arXiv, Crossref và OpenAlex</summary>
           <form id="scout-form">
-            <label class="sr-only" for="scout-query">Từ khóa tìm bài báo</label
+            <label class="sr-only" for="scout-query"
+              >Từ khóa tìm bài báo hoặc DOI</label
             ><input
               id="scout-query"
               placeholder="vd. retrieval augmented generation"
               minlength="3"
               maxlength="300"
               required
-            /><button class="secondary" id="scout-button">Tìm bài báo</button>
+            /><button class="secondary" id="scout-button" type="submit">
+              Tìm bài báo
+            </button>
           </form>
           <p class="muted small">
             Thông tin thư mục chưa phải bằng chứng toàn văn.
           </p>
+          <p id="scout-status" class="small" role="status"></p>
           <div id="scout-results"></div>
         </details>
         <div class="section-title history-title">
@@ -127,6 +136,12 @@
                 >Truy hồi<select id="retrieval">
                   <option value="hybrid">Hybrid (nếu có embedding)</option>
                   <option value="lexical">BM25</option>
+                </select></label
+              ><label
+                >Kiểu báo cáo<select id="style">
+                  <option value="overview">Tổng quan</option>
+                  <option value="comparison">So sánh</option>
+                  <option value="literature_review">Tổng quan tài liệu</option>
                 </select></label
               >
             </div>

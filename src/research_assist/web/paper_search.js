@@ -1,5 +1,11 @@
 import { api } from "./api.js";
 import { $, el } from "./dom.js";
+import {
+  appendScoutAbstract,
+  scoutBibtexButton,
+  scoutPaperLink,
+  scoutSourceName,
+} from "./scout.js?v=research-exports-1";
 
 export function initializePaperSearch(refreshDocuments) {
   const form = $("#paper-search-form");
@@ -29,9 +35,7 @@ export function initializePaperSearch(refreshDocuments) {
     results.replaceChildren();
     const selectedSource = source.value;
     status.textContent =
-      "Đang tìm trên " +
-      (selectedSource === "crossref" ? "Crossref" : "arXiv") +
-      "…";
+      "Đang tìm trên " + (scoutSourceName(selectedSource) || "arXiv") + "…";
     setBusy(true);
     try {
       const papers = await api("/papers/search", {
@@ -40,8 +44,25 @@ export function initializePaperSearch(refreshDocuments) {
       });
       for (const paper of papers) {
         const row = el("li");
+        const provider = paper.source || selectedSource;
+        if (provider === "openalex") {
+          row.append(
+            scoutPaperLink(paper, "") || el("strong", "", paper.title),
+            el(
+              "small",
+              "",
+              ["OpenAlex", paper.authors.join(", "), paper.published, paper.doi]
+                .filter(Boolean)
+                .join(" · "),
+            ),
+          );
+          appendScoutAbstract(row, paper);
+          row.append(scoutBibtexButton(paper, "secondary-button"));
+          results.append(row);
+          continue;
+        }
         const title = el("a", "", paper.title);
-        const isCrossref = paper.source === "crossref";
+        const isCrossref = provider === "crossref";
         title.href = isCrossref
           ? "https://doi.org/" + encodeURIComponent(paper.doi)
           : "https://arxiv.org/abs/" +
@@ -82,6 +103,7 @@ export function initializePaperSearch(refreshDocuments) {
               .join(" · "),
           ),
         );
+        const actions = el("div", "scout-paper-actions");
         if (isCrossref || paper.import_available === false) {
           row.append(
             el(
@@ -91,8 +113,10 @@ export function initializePaperSearch(refreshDocuments) {
             ),
           );
         } else {
-          row.append(add);
+          actions.append(add);
         }
+        actions.append(scoutBibtexButton(paper, "secondary-button"));
+        row.append(actions);
         results.append(row);
       }
       status.textContent = papers.length

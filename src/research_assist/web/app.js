@@ -4,21 +4,21 @@ import {
   executionSelection,
   refreshDiagnostics,
   selectPreset,
-} from "./fusion_workspace.js?v=inline-model-1";
+} from "./fusion_workspace.js?v=research-exports-1";
 import {
   initializeCommands,
   expandQuestion,
   readCommand,
-} from "./commands.js?v=slash-menu-1";
+} from "./commands.js?v=openalex-scout-1";
 import { api, uploadDocument } from "./api.js";
-import { initializePaperSearch } from "./paper_search.js";
+import { initializePaperSearch } from "./paper_search.js?v=research-exports-1";
 import { $, $$, el, icon, dateLabel, statuses, toast } from "./dom.js";
 import {
   renderEvents,
   renderResult,
   selectTab,
   copyReport,
-} from "./report.js?v=verified-report-1";
+} from "./report.js?v=research-exports-1";
 import { renderBenchmark, renderRoutes } from "./lab.js";
 import { recordStatusLabel } from "./run_status.js";
 import {

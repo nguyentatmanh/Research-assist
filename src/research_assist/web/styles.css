@@ -761,9 +761,6 @@ th {
   font-size: 20px;
   margin-top: 1.6em;
 }
-.report-content > p:first-of-type {
-  display: none;
-}
 .report-content li {
   margin-bottom: 14px;
 }

@@ -396,7 +396,7 @@ summary {
 }
 .options {
   display: grid;
-  grid-template-columns: 1.5fr 1fr 1.3fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 10px;
 }
@@ -662,6 +662,17 @@ select {
   padding-left: 15px;
   margin-left: 0;
   color: var(--muted);
+}
+.studio-citation {
+  padding: 0 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--pale);
+  color: var(--green);
+}
+.ledger-evidence:focus {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
 }
 .ledger-card {
   border-bottom: 1px solid var(--line);

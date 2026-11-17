@@ -26,7 +26,12 @@
     <link rel="stylesheet" href="/assets/fusion.css?v=inline-model-1" />
     <link rel="stylesheet" href="/assets/target_editor.css" />
     <link rel="stylesheet" href="/assets/commands.css?v=slash-menu-1" />
-    <script type="module" src="/assets/app.js?v=verified-report-1"></script>
+    <link
+      rel="stylesheet"
+      href="/assets/report_table.css?v=research-exports-1"
+    />
+    <link rel="stylesheet" href="/assets/scout.css?v=research-exports-1" />
+    <script type="module" src="/assets/app.js?v=research-exports-1"></script>
   </head>
   <body>
     <a class="skip-link" href="#main-content">Đến nội dung chính</a>
@@ -820,9 +825,11 @@
               </button>
             </div>
             <details class="paper-discovery">
-              <summary>Khám phá bài liên quan · arXiv + Crossref</summary>
+              <summary>
+                Khám phá bài liên quan · arXiv, Crossref và OpenAlex
+              </summary>
               <form id="scout-form">
-                <label for="scout-query">Từ khóa học thuật</label>
+                <label for="scout-query">Từ khóa học thuật hoặc DOI</label>
                 <div class="paper-query-row">
                   <input
                     id="scout-query"
@@ -844,7 +851,7 @@
               </p>
             </details>
             <details class="paper-discovery">
-              <summary>Tìm riêng theo nguồn · arXiv hoặc Crossref</summary>
+              <summary>Tìm riêng theo nguồn</summary>
               <form id="paper-search-form">
                 <label for="paper-source">Nguồn tìm kiếm</label
                 ><select id="paper-source">
@@ -852,8 +859,11 @@
                   <option value="crossref">
                     Crossref — thông tin bài và DOI
                   </option>
+                  <option value="openalex">
+                    OpenAlex — thông tin bài và DOI
+                  </option>
                 </select>
-                <label for="paper-query">Từ khóa hoặc tiêu đề bài báo</label>
+                <label for="paper-query">Từ khóa, tiêu đề hoặc DOI</label>
                 <div class="paper-query-row">
                   <input
                     type="search"
@@ -863,7 +873,7 @@
                     required
                   />
                   <button class="secondary-button" type="submit">
-                    Tìm trên arXiv
+                    Tìm bài báo
                   </button>
                 </div>
               </form>

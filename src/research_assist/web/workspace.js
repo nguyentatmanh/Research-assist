@@ -3,19 +3,29 @@ import {
   expandQuestion,
   mountCommandMenu,
   readCommand,
-} from "./commands.js?v=slash-menu-1";
+} from "./commands.js?v=openalex-scout-1";
 import { $, $$, el } from "./dom.js";
 import { recordStatusLabel } from "./run_status.js";
+import {
+  appendScoutAbstract,
+  appendScoutGapActions,
+  scoutBibtexButton,
+  focusScoutInput,
+  scoutPaperLink,
+  scoutPaperMetadata,
+} from "./scout.js?v=research-exports-1";
 import {
   clearGpuKey,
   initializeGpuSettings,
   loadGpuSettings,
 } from "./gpu_settings.js?v=kaggle-chat-1";
 import {
+  appendReportCitations,
   citationIndex,
   presentReport,
-  unescapeReport,
-} from "./report_content.js?v=source-reader-1";
+  renderReportTable,
+  reportBlocks,
+} from "./report_content.js?v=research-exports-1";
 import { createSourceReader } from "./source_reader.js?v=continuous-pdf-1";
 import { createTargetForm } from "./target_editor.js?v=agent-matrix-1";
 
@@ -292,7 +302,25 @@ function renderEvents(progress, record) {
 }
 function markdown(parent, value, sources, followCitation) {
   let list;
-  for (const line of value.split("\n")) {
+  let tableHeading;
+  const createCitation = (marker) => {
+    const source = sources.get(marker);
+    if (!source) return null;
+    const citationButton = button(marker, "workspace-citation", () =>
+      followCitation(source, marker),
+    );
+    citationButton.setAttribute(
+      "aria-label",
+      `Xem trích dẫn ${marker} trong tài liệu`,
+    );
+    return citationButton;
+  };
+  for (const line of reportBlocks(value)) {
+    if (typeof line !== "string") {
+      list = null;
+      parent.append(renderReportTable(line, createCitation, tableHeading));
+      continue;
+    }
     if (!line.trim()) {
       list = null;
       continue;
@@ -314,24 +342,8 @@ function markdown(parent, value, sources, followCitation) {
     const raw = (heading ? heading[2] : bullet || quoted ? line.slice(2) : line)
       .replace(/\*\*/g, "")
       .replace(/^\*([^*]+)\*$/, "$1");
-    let offset = 0;
-    const citations = /\\[\\`*_{}\[\]<>()#!|]|\[\d+\]/g;
-    for (const match of raw.matchAll(citations)) {
-      const marker = match[0];
-      if (marker.startsWith("\\") || quoted || !sources.has(marker)) continue;
-      row.append(unescapeReport(raw.slice(offset, match.index)));
-      const source = sources.get(marker);
-      const citationButton = button(marker, "workspace-citation", () =>
-        followCitation(source, marker),
-      );
-      citationButton.setAttribute(
-        "aria-label",
-        `Xem trích dẫn ${marker} trong tài liệu`,
-      );
-      row.append(citationButton);
-      offset = match.index + marker.length;
-    }
-    row.append(unescapeReport(raw.slice(offset)));
+    appendReportCitations(row, raw, quoted ? () => null : createCitation);
+    if (heading) tableHeading = row.textContent;
     if (bullet) {
       if (!list) {
         list = el("ul");
@@ -435,13 +447,23 @@ function report(record) {
     ),
   );
   card.append(body, actions);
+  appendScoutGapActions(card, result, "scout-action-btn ghost", (query) => {
+    commandMenu.close();
+    focusScoutInput(prompt, query);
+    setScout(true);
+  });
   feed.append(card);
   renderSidecar();
   requestAnimationFrame(() => {
     feed.scrollTop = feed.scrollHeight;
   });
 }
-async function research(question, docIds, displayQuestion = question) {
+async function research(
+  question,
+  docIds,
+  displayQuestion = question,
+  style = "overview",
+) {
   const progress = timeline();
   let record = await api("/runs", {
     method: "POST",
@@ -452,6 +474,7 @@ async function research(question, docIds, displayQuestion = question) {
       }),
       document_ids: docIds,
       scope_mode: "selected",
+      style,
       orchestration_mode: orchestration,
       max_rounds: loops,
       agent_targets: Object.fromEntries(
@@ -474,44 +497,55 @@ async function research(question, docIds, displayQuestion = question) {
 }
 async function discover(question) {
   const list = el("div", "agent-output-block scout-results-block");
-  list.append(el("h3", "scout-banner-title", "Bài báo trên arXiv / Crossref"));
+  list.append(el("h3", "scout-banner-title", "Bài báo liên quan"));
   feed.append(list);
   const { papers, warnings } = await api("/scout/search", {
     method: "POST",
     body: { query: question.slice(0, 300) },
   });
-  for (const warning of warnings) list.append(el("p", "", warning));
+  for (const warning of warnings || []) list.append(el("p", "", warning));
   if (!papers.length) list.append(el("p", "", "Không tìm thấy bài phù hợp."));
   for (const paper of papers) {
     const card = el("article", "scout-paper-card");
-    const importButton = button(
-      "Nhập PDF và phân tích",
-      "scout-action-btn primary",
-      async () => {
-        if (busy) return;
-        busy = true;
-        syncSend();
-        try {
-          const { document: doc } = await api("/papers/import", {
-            method: "POST",
-            body: { paper_id: paper.arxiv_id },
-          });
-          await loadDocs();
-          await research(question, [doc.id]);
-        } finally {
-          activeRun = null;
-          busy = false;
-          syncSend();
-        }
-      },
-    );
     card.append(
       el("h4", "scout-card-title", paper.title),
-      el("p", "", paper.authors.join(", ")),
-      paper.provider === "arxiv"
-        ? importButton
-        : link("Mở bài qua DOI", "scout-action-btn", paper.url),
+      el("p", "scout-card-authors", scoutPaperMetadata(paper)),
     );
+    appendScoutAbstract(card, paper);
+    const actions = el("div", "scout-card-actions");
+    if (paper.arxiv_id && paper.import_available !== false) {
+      actions.append(
+        button(
+          "Nhập PDF và phân tích",
+          "scout-action-btn primary",
+          async () => {
+            if (busy) return;
+            busy = true;
+            syncSend();
+            try {
+              const { document: doc } = await api("/papers/import", {
+                method: "POST",
+                body: { paper_id: paper.arxiv_id },
+              });
+              await loadDocs();
+              await research(question, [doc.id]);
+            } finally {
+              activeRun = null;
+              busy = false;
+              syncSend();
+            }
+          },
+        ),
+      );
+    }
+    const source = scoutPaperLink(
+      paper,
+      "scout-action-btn ghost",
+      "Mở trang bài báo",
+    );
+    if (source) actions.append(source);
+    actions.append(scoutBibtexButton(paper, "scout-action-btn ghost"));
+    card.append(actions);
     list.append(card);
   }
 }
@@ -585,6 +619,12 @@ async function submit() {
     notice("Chọn ít nhất một tài liệu trong kho trước khi gửi câu hỏi.");
     return;
   }
+  const comparesDocuments =
+    parsed?.command?.name === "/so-sanh" ||
+    (selected.size >= 2 &&
+      /(?<![\p{L}\p{N}_])(?:so\s+sánh|so\s+trực\s+tiếp|đối\s+chiếu|compare)(?![\p{L}\p{N}_])/iu.test(
+        value.normalize("NFC"),
+      ));
   if (searching !== scout) setScout(searching);
   prompt.value = "";
   commandMenu.close();
@@ -594,7 +634,13 @@ async function submit() {
   syncSend();
   try {
     if (searching) await discover(question);
-    else await research(question, [...selected], value);
+    else
+      await research(
+        question,
+        [...selected],
+        value,
+        comparesDocuments ? "comparison" : "overview",
+      );
   } finally {
     activeRun = null;
     busy = false;

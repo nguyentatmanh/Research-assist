@@ -3,10 +3,17 @@ import { $, $$, el, locator, statuses, toast } from "./dom.js";
 import { renderUsage } from "./lab.js";
 import { runPresentation } from "./run_status.js";
 import {
+  appendScoutGapActions,
+  focusScoutInput,
+} from "./scout.js?v=research-exports-1";
+import {
+  appendReportCitations,
   citationIndex,
   presentReport,
+  renderReportTable,
+  reportBlocks,
   unescapeReport,
-} from "./report_content.js?v=verified-report-1";
+} from "./report_content.js?v=research-exports-1";
 
 const agentLabels = {
   supervisor: "Supervisor (phiên cũ)",
@@ -20,23 +27,15 @@ const agentLabels = {
 let currentResult = null;
 let citations = new Map();
 
-function appendCitations(parent, value) {
-  const expression = /(?<!\\)\[(\d+)\]/g;
-  let start = 0;
-  for (const match of value.matchAll(expression)) {
-    parent.append(
-      document.createTextNode(unescapeReport(value.slice(start, match.index))),
-    );
-    const evidence = citations.get(match[0]);
-    if (evidence) {
-      const button = el("button", "citation-button", match[0]);
-      button.title = `${evidence.filename} · ${locator(evidence)}`;
-      button.addEventListener("click", () => showEvidence(evidence));
-      parent.append(button);
-    } else parent.append(document.createTextNode(match[0]));
-    start = match.index + match[0].length;
-  }
-  parent.append(document.createTextNode(unescapeReport(value.slice(start))));
+function reportCitation(marker) {
+  const evidence = citations.get(marker);
+  if (!evidence) return null;
+  const button = el("button", "citation-button", marker);
+  button.type = "button";
+  button.title = `${evidence.filename} · ${locator(evidence)}`;
+  button.setAttribute("aria-label", `Xem trích dẫn ${marker} trong tài liệu`);
+  button.addEventListener("click", () => showEvidence(evidence));
+  return button;
 }
 
 // This is a deliberately small, text-only renderer for the writer's known Markdown format.
@@ -45,7 +44,13 @@ export function renderMarkdown(markdown) {
   const root = $("#report-content");
   root.replaceChildren();
   let list = null;
-  for (const line of presentReport(markdown).split("\n")) {
+  let tableHeading;
+  for (const line of reportBlocks(presentReport(markdown))) {
+    if (typeof line !== "string") {
+      list = null;
+      root.append(renderReportTable(line, reportCitation, tableHeading));
+      continue;
+    }
     if (!line.trim()) {
       list = null;
       continue;
@@ -54,15 +59,16 @@ export function renderMarkdown(markdown) {
       const heading = unescapeReport(line.slice(2));
       if (heading !== $("#result-title")?.textContent)
         root.append(el("h1", "", heading));
-    } else if (line.startsWith("## "))
-      root.append(el("h2", "", unescapeReport(line.slice(3))));
-    else if (line.startsWith("- ")) {
+    } else if (line.startsWith("## ")) {
+      tableHeading = unescapeReport(line.slice(3));
+      root.append(el("h2", "", tableHeading));
+    } else if (line.startsWith("- ")) {
       if (!list) {
         list = el("ul");
         root.append(list);
       }
       const item = el("li");
-      appendCitations(item, line.slice(2));
+      appendReportCitations(item, line.slice(2), reportCitation);
       list.append(item);
     } else if (line.startsWith("> "))
       root.append(el("blockquote", "", unescapeReport(line.slice(2))));
@@ -78,7 +84,11 @@ export function renderMarkdown(markdown) {
       root.append(el("p", "report-note", unescapeReport(line.slice(1, -1))));
     } else {
       const paragraph = el("p");
-      appendCitations(paragraph, line.replace(/\*\*/g, ""));
+      appendReportCitations(
+        paragraph,
+        line.replace(/\*\*/g, ""),
+        reportCitation,
+      );
       root.append(paragraph);
     }
   }
@@ -262,6 +272,15 @@ export function renderResult(result, displayQuestion) {
   );
   $("#checks-count").textContent = String(result.checks.length);
   renderMarkdown(result.markdown);
+  appendScoutGapActions(
+    $("#report-content"),
+    result,
+    "secondary-button",
+    (query) => {
+      $('[data-view="library"]').click();
+      focusScoutInput($("#scout-query"), query);
+    },
+  );
   renderChecks(result);
   renderCoverage(result);
   renderEvidence(result.evidence);

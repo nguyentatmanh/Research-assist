@@ -1,6 +1,21 @@
 import { api, uploadDocument } from "./api.js";
 import { $, $$, el, toast, statuses } from "./dom.js";
-import { presentReport } from "./report_content.js?v=verified-report-1";
+import {
+  appendScoutAbstract,
+  appendScoutGapActions,
+  scoutBibtexButton,
+  focusScoutInput,
+  scoutPaperLink,
+  scoutPaperMetadata,
+} from "./scout.js?v=research-exports-1";
+import {
+  appendReportCitations,
+  citationIndex,
+  presentReport,
+  renderReportTable,
+  reportBlocks,
+  unescapeReport,
+} from "./report_content.js?v=research-exports-1";
 
 const roles = [
   ["retrieval", "Retrieval", "Lập truy vấn · tìm nguồn"],
@@ -129,37 +144,49 @@ function renderAgents(events = []) {
     root.append(card);
   });
 }
-function renderMarkdown(markdown, root) {
+function renderMarkdown(markdown, root, createCitation) {
   // Small text-only Markdown subset. Raw HTML/model links are never executed.
   root.replaceChildren();
   let list = null;
-  const text = (s) => s.replace(/\\([\\`*_{}\[\]<>()#!|])/g, "$1");
-  for (const line of markdown.split("\n")) {
+  let tableHeading;
+  for (const line of reportBlocks(markdown)) {
+    if (typeof line !== "string") {
+      list = null;
+      root.append(renderReportTable(line, createCitation, tableHeading));
+      continue;
+    }
     if (!line.trim()) {
       list = null;
       continue;
     }
-    if (line.startsWith("# ")) root.append(el("h1", "", text(line.slice(2))));
-    else if (line.startsWith("## "))
-      root.append(el("h2", "", text(line.slice(3))));
-    else if (line.startsWith("### "))
-      root.append(el("h3", "", text(line.slice(4))));
+    if (line.startsWith("# "))
+      root.append(el("h1", "", unescapeReport(line.slice(2))));
+    else if (line.startsWith("## ")) {
+      tableHeading = unescapeReport(line.slice(3));
+      root.append(el("h2", "", tableHeading));
+    } else if (line.startsWith("### "))
+      root.append(el("h3", "", unescapeReport(line.slice(4))));
     else if (line.startsWith("> "))
-      root.append(el("blockquote", "", text(line.slice(2))));
+      root.append(el("blockquote", "", unescapeReport(line.slice(2))));
     else if (line.startsWith("- ")) {
       if (!list) {
         list = el("ul");
         root.append(list);
       }
-      list.append(el("li", "", text(line.slice(2))));
+      const item = el("li");
+      appendReportCitations(item, line.slice(2), createCitation);
+      list.append(item);
     } else {
       list = null;
-      root.append(el("p", "", text(line)));
+      const paragraph = el("p");
+      appendReportCitations(paragraph, line, createCitation);
+      root.append(paragraph);
     }
   }
 }
 function renderLedger(result) {
   const root = $("#ledger-panel");
+  const evidenceTargets = new Map();
   root.replaceChildren();
   root.append(
     el(
@@ -170,7 +197,7 @@ function renderLedger(result) {
   );
   if (!result) {
     root.append(el("p", "empty", "Chưa có kết quả kiểm chứng."));
-    return;
+    return evidenceTargets;
   }
   const audit = result.citation_audit;
   root.append(
@@ -196,13 +223,17 @@ function renderLedger(result) {
     for (const eid of check?.evidence_ids || []) {
       const ev = result.evidence.find((e) => e.id === eid);
       if (!ev) continue;
-      card.append(
+      const target = el("div", "ledger-evidence");
+      target.tabIndex = -1;
+      target.append(
         el("blockquote", "", ev.quote),
         externalLink(
           `${ev.filename} · ${ev.page ? "trang " + ev.page : ev.section} · ký tự ${ev.start}–${ev.end}`,
           `/api/documents/${encodeURIComponent(ev.document_id)}/file${ev.page ? "#page=" + ev.page : ""}`,
         ),
       );
+      if (!evidenceTargets.has(eid)) evidenceTargets.set(eid, target);
+      card.append(target);
     }
     root.append(card);
   }
@@ -228,6 +259,7 @@ function renderLedger(result) {
       },
     ),
   );
+  return evidenceTargets;
 }
 function renderTrace(events) {
   const root = $("#trace-panel");
@@ -270,6 +302,7 @@ function renderRun() {
     ),
   );
   if (record.error) $("#run-meta").append(el("p", "warning", record.error));
+  const evidenceTargets = renderLedger(result);
   if (result) {
     $("#run-meta").append(
       el(
@@ -280,7 +313,29 @@ function renderRun() {
     );
     for (const warning of result.warnings || [])
       $("#run-meta").append(el("p", "warning", warning));
-      renderMarkdown(presentReport(result.markdown), $("#report-panel"));
+    const citations = citationIndex(result);
+    renderMarkdown(
+      presentReport(result.markdown),
+      $("#report-panel"),
+      (marker) => {
+        const evidence = citations.get(marker);
+        const target = evidenceTargets.get(evidence?.id);
+        if (!target) return null;
+        const node = button(marker, "studio-citation", () => {
+          selectStudioTab("ledger");
+          target.focus({ preventScroll: true });
+          target.scrollIntoView({ block: "nearest" });
+        });
+        node.setAttribute(
+          "aria-label",
+          `Xem bằng chứng ${marker} trong mục Kiểm chứng`,
+        );
+        return node;
+      },
+    );
+    appendScoutGapActions($("#report-panel"), result, "secondary", (query) =>
+      focusScoutInput($("#scout-query"), query),
+    );
     const values = [
       result.reported_claim_ids.length,
       result.evidence.length,
@@ -307,7 +362,6 @@ function renderRun() {
     $("#export-json").disabled =
     $("#print").disabled =
       !result;
-  renderLedger(result);
   renderTrace(record.events || []);
   renderAgents(record.events || []);
 }
@@ -457,6 +511,7 @@ $("#research-form").addEventListener(
           document_ids: [...selected],
           scope_mode: "selected",
           language: $("#language").value,
+          style: $("#style").value,
           orchestration_mode: $("#mode").value,
           retrieval_mode: $("#retrieval").value,
           requirements,
@@ -481,16 +536,17 @@ $("#cancel").addEventListener(
     }
   }),
 );
-$$("[data-tab]").forEach((tab) =>
-  tab.addEventListener("click", () => {
-    $$("[data-tab]").forEach((t) => {
-      t.classList.toggle("active", t === tab);
-      t.setAttribute("aria-selected", String(t === tab));
-    });
-    for (const name of ["report", "ledger", "trace"])
-      $(`#${name}-panel`).hidden = name !== tab.dataset.tab;
-  }),
-);
+function selectStudioTab(name) {
+  for (const tab of $$("[data-tab]")) {
+    const active = tab.dataset.tab === name;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+  }
+  for (const panel of ["report", "ledger", "trace"])
+    $(`#${panel}-panel`).hidden = panel !== name;
+}
+for (const tab of $$("[data-tab]"))
+  tab.addEventListener("click", () => selectStudioTab(tab.dataset.tab));
 for (const format of ["md", "json"])
   $(`#export-${format}`).addEventListener("click", () => {
     if (record?.result)
@@ -501,29 +557,30 @@ $("#scout-form").addEventListener(
   "submit",
   guarded(async (event) => {
     event.preventDefault();
-    $("#scout-button").disabled = true;
+    const submit = $("#scout-button");
+    if (submit.disabled) return;
+    submit.disabled = true;
     const root = $("#scout-results");
-    root.replaceChildren(el("p", "small", "Đang tìm…"));
+    const status = $("#scout-status");
+    status.textContent = "Đang tìm bài báo…";
+    root.replaceChildren();
     try {
       const result = await api("/scout/search", {
         method: "POST",
-        body: { query: $("#scout-query").value },
+        body: { query: $("#scout-query").value.trim() },
       });
-      root.replaceChildren();
-      for (const warning of result.warnings)
+      for (const warning of result.warnings || [])
         root.append(el("p", "small muted", warning));
       for (const paper of result.papers) {
         const card = el("div", "paper-card");
         card.append(
-          externalLink(paper.title, paper.url),
-          el(
-            "p",
-            "small muted",
-            `${paper.provider} · ${paper.year || "chưa rõ năm"}`,
-          ),
+          scoutPaperLink(paper, "source-link") || el("strong", "", paper.title),
+          el("p", "small muted", scoutPaperMetadata(paper)),
         );
-        if (paper.arxiv_id)
-          card.append(
+        appendScoutAbstract(card, paper);
+        const actions = el("div", "scout-paper-actions");
+        if (paper.arxiv_id && paper.import_available !== false) {
+          actions.append(
             button("Nhập PDF arXiv", "secondary", async () => {
               await api("/papers/import", {
                 method: "POST",
@@ -533,7 +590,7 @@ $("#scout-form").addEventListener(
               toast("Đã nhập PDF.");
             }),
           );
-        else
+        } else {
           card.append(
             el(
               "p",
@@ -541,12 +598,18 @@ $("#scout-form").addEventListener(
               "Mở nguồn và tải toàn văn nếu bạn có quyền truy cập.",
             ),
           );
+        }
+        actions.append(scoutBibtexButton(paper, "secondary"));
+        card.append(actions);
         root.append(card);
       }
-      if (!result.papers.length)
-        root.append(el("p", "small muted", "Chưa tìm thấy bài báo."));
+      status.textContent = result.papers.length
+        ? `Tìm được ${result.papers.length} bài.`
+        : "Chưa tìm thấy bài. Thử một tiêu đề hoặc từ khóa khác.";
+    } catch (error) {
+      status.textContent = error.message;
     } finally {
-      $("#scout-button").disabled = false;
+      submit.disabled = false;
     }
   }),
 );

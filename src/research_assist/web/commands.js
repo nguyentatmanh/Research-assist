@@ -67,7 +67,7 @@ const groups = [
       [
         "/tim-bai",
         "Tìm bài báo",
-        "Tìm theo từ khóa trên arXiv và Crossref.",
+        "Tìm bài trên arXiv, Crossref và OpenAlex.",
         "papers",
       ],
     ],

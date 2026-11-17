@@ -1,6 +1,12 @@
 import { api } from "./api.js";
 import { createTargetForm } from "./target_editor.js";
 import { $, $$, el, toast } from "./dom.js";
+import {
+  appendScoutAbstract,
+  scoutBibtexButton,
+  scoutPaperLink,
+  scoutPaperMetadata,
+} from "./scout.js?v=research-exports-1";
 
 const roles = {
   retrieval: [
@@ -259,7 +265,7 @@ export function initializeWorkspace(refreshDocuments) {
     const status = $("#scout-status"),
       root = $("#scout-results");
     root.replaceChildren();
-    status.textContent = "Đang tìm arXiv và Crossref…";
+    status.textContent = "Đang tìm bài báo…";
     try {
       const result = await api("/scout/search", {
         method: "POST",
@@ -267,23 +273,13 @@ export function initializeWorkspace(refreshDocuments) {
       });
       for (const paper of result.papers) {
         const row = el("li", "scout-result");
-        const link = el("a", "", paper.title);
-        const url = new URL(paper.url);
-        if (url.protocol === "https:") {
-          link.href = url.href;
-          link.target = "_blank";
-          link.rel = "noopener noreferrer";
-        }
         row.append(
-          link,
-          el(
-            "small",
-            "",
-            `${paper.provider} · ${paper.year || "—"} · ${paper.authors.join(", ")}`,
-          ),
+          scoutPaperLink(paper, "") || el("strong", "", paper.title),
+          el("small", "", scoutPaperMetadata(paper)),
         );
-        if (paper.arxiv_id) {
+        if (paper.arxiv_id && paper.import_available !== false) {
           const add = el("button", "secondary-button", "Nhập PDF arXiv");
+          add.type = "button";
           add.dataset.arxiv = paper.arxiv_id;
           add.addEventListener("click", async () => {
             add.disabled = true;
@@ -301,6 +297,8 @@ export function initializeWorkspace(refreshDocuments) {
           });
           row.append(add);
         }
+        row.append(scoutBibtexButton(paper, "secondary-button"));
+        appendScoutAbstract(row, paper);
         root.append(row);
       }
       status.textContent = `${result.papers.length} kết quả. ${(result.warnings || []).join(" ")} ${result.policy}`;
