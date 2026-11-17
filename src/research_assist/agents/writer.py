@@ -1,11 +1,18 @@
 import re
+from collections.abc import Callable
 
 from research_assist.agents.policies.verification import validate_checks
 from research_assist.agents.prompts.writer import INSTRUCTION
+from research_assist.domain.comparison import (
+    direct_comparison_clause,
+    names_multiple_papers,
+    states_comparison,
+)
 from research_assist.domain.coverage import requirements_for
 from research_assist.domain.models import (
     Claim,
     ClaimCheck,
+    Document,
     Evidence,
     EvidenceGap,
     ReportBlock,
@@ -50,8 +57,15 @@ class WriterAgent:
         deterministic: bool = False,
         layout: WriterOutput | None = None,
         user_requirements: list[str] | None = None,
+        scope_documents: list[Document] | None = None,
     ) -> WrittenReport:
-        checks = validate_checks(claims, evidence, checks)
+        checks = validate_checks(
+            claims,
+            evidence,
+            checks,
+            question=request.question,
+            requirements=requirements_for(request),
+        )
         supported = {check.claim_id: check for check in checks if check.verdict == "supported"}
         verified = [c for c in claims if c.id in supported]
         en = request.language == "en"
@@ -93,7 +107,51 @@ class WriterAgent:
         lookup = {c.id: c for c in verified}
         ev_lookup = {e.id: e for e in evidence}
         cited: list[str] = []
-        used, warnings = set(), []
+        used: set[str] = set()
+        warnings: list[str] = []
+
+        def render_claim(claim: Claim) -> str:
+            used.add(claim.id)
+            markers = []
+            for eid in supported[claim.id].evidence_ids:
+                if eid not in cited:
+                    cited.append(eid)
+                markers.append(f"[{cited.index(eid) + 1}]")
+            prefix = (
+                ("Proposal: " if en else "Đề xuất: ")
+                if claim.kind == "grounded_recommendation"
+                else ""
+            )
+            return prefix + escape_markdown(claim.text) + " " + " ".join(markers)
+
+        lines: list[str] = []
+        if names_multiple_papers(request.question) and direct_comparison_clause(request.question):
+            first = next(
+                (
+                    claim
+                    for claim in verified
+                    if states_comparison(claim.text)
+                    and len(
+                        {ev_lookup[eid].document_id for eid in supported[claim.id].evidence_ids}
+                    )
+                    >= 2
+                ),
+                None,
+            )
+            if first:
+                lines.extend([render_claim(first), ""])
+        if request.style == "comparison":
+            lines.extend(
+                self._comparison(
+                    request,
+                    [claim for claim in verified if claim.id not in used],
+                    supported,
+                    ev_lookup,
+                    scope_documents,
+                    render_claim,
+                    warnings,
+                )
+            )
         headings = {
             "grounded proposals": ("Grounded proposals", "Đề xuất"),
             "methods": ("Methods", "Phương pháp"),
@@ -109,7 +167,6 @@ class WriterAgent:
             "bằng chứng",
             "bằng chứng từ tài liệu",
         }
-        lines: list[str] = []
         selected_ids = {b.claim_id for section in output.sections for b in section.blocks}
         omitted = [c for c in verified if c.id not in selected_ids]
         sections = list(output.sections)
@@ -129,19 +186,7 @@ class WriterAgent:
                             "Writer: đã loại một nhận định chưa được kiểm tra hoặc không tồn tại."
                         )
                     continue
-                used.add(block.claim_id)
-                claim = lookup[block.claim_id]
-                markers = []
-                for eid in supported[claim.id].evidence_ids:
-                    if eid not in cited:
-                        cited.append(eid)
-                    markers.append(f"[{cited.index(eid) + 1}]")
-                prefix = (
-                    ("Proposal: " if en else "Đề xuất: ")
-                    if claim.kind == "grounded_recommendation"
-                    else ""
-                )
-                items.append(prefix + escape_markdown(claim.text) + " " + " ".join(markers))
+                items.append(render_claim(lookup[block.claim_id]))
             if items:
                 name = section.heading.strip().casefold()
                 pair = headings.get(name)
@@ -196,6 +241,90 @@ class WriterAgent:
             claim_ids=[c.id for c in verified if c.id in used],
             citation_evidence_ids=cited,
         )
+
+    @staticmethod
+    def _comparison(
+        request: ResearchRequest,
+        claims: list[Claim],
+        checks: dict[str, ClaimCheck],
+        evidence: dict[str, Evidence],
+        scope_documents: list[Document] | None,
+        render_claim: Callable[[Claim], str],
+        warnings: list[str],
+    ) -> list[str]:
+        en = request.language == "en"
+        names = {
+            item.document_id: item.document_title.strip() or item.filename
+            for item in evidence.values()
+        }
+        scoped_names = {
+            item.id: item.title.strip() or item.filename for item in scope_documents or []
+        }
+        columns = request.document_ids or list(scoped_names or names)
+        names.update(scoped_names)
+        sources = {
+            claim.id: {evidence[eid].document_id for eid in checks[claim.id].evidence_ids}
+            for claim in claims
+        }
+        if len(columns) > 5:
+            cited_documents = set().union(*sources.values())
+            columns = [key for key in columns if key in cited_documents]
+            if not 2 <= len(columns) <= 5:
+                warnings.append(
+                    "A comparison table for a scope over five documents requires two to "
+                    "five documents with verified findings."
+                    if en
+                    else "Với phạm vi hơn năm tài liệu, bảng so sánh cần từ hai đến năm "
+                    "tài liệu có nhận định đã kiểm chứng."
+                )
+                return []
+        if len(columns) < 2:
+            return []
+
+        requirements = requirements_for(request)
+        requirement_ids = {r.id for r in requirements}
+        cells: dict[tuple[str, str], list[Claim]] = {}
+        synthesis: list[Claim] = []
+        column_ids = set(columns)
+        for claim in claims:
+            relevant = requirement_ids.intersection(claim.requirement_ids)
+            if not claim.requirement_ids and len(requirements) == 1:
+                # An extractive finding can be displayed under the only comparison criterion.
+                # Leave explicit requirement assignments and coverage judgements unmodified.
+                relevant = requirement_ids
+            document_ids = sources[claim.id]
+            if not relevant or not document_ids.issubset(column_ids):
+                continue
+            if len(document_ids) > 1:
+                synthesis.append(claim)
+            else:
+                document_id = next(iter(document_ids))
+                for requirement_id in relevant:
+                    cells.setdefault((requirement_id, document_id), []).append(claim)
+        if not cells and not synthesis:
+            return []
+
+        header = ["Criterion" if en else "Tiêu chí"]
+        header.extend(escape_markdown(names.get(key) or key) for key in columns)
+        lines = [
+            "## Document comparison" if en else "## So sánh tài liệu",
+            "",
+            "| " + " | ".join(header) + " |",
+            "| " + " | ".join(["---"] * len(header)) + " |",
+        ]
+        empty = "Insufficient evidence" if en else "Chưa đủ bằng chứng"
+        for requirement in requirements:
+            values = [escape_markdown(requirement.text)]
+            for key in columns:
+                items = cells.get((requirement.id, key), [])
+                values.append(" · ".join(render_claim(claim) for claim in items) or empty)
+            lines.append("| " + " | ".join(values) + " |")
+        lines.append("")
+        if synthesis:
+            lines.extend(["## Cross-document findings" if en else "## Nhận định tổng hợp", ""])
+            lines.extend("- " + render_claim(claim) for claim in synthesis)
+            lines.append("")
+        return lines
 
     @staticmethod
     def _research_directions(request: ResearchRequest, gaps: list[EvidenceGap] | None) -> list[str]:

@@ -43,7 +43,7 @@ class SummarizerAgent:
             schema=SynthesisOutput,
             fallback=lambda: SynthesisOutput(
                 claims=[
-                    RawClaim(text=e.quote, evidence_ids=[e.id])
+                    RawClaim(text=e.quote, evidence_ids=[e.id], requirement_ids=e.requirement_ids)
                     for e in evidence[:12]
                     if len(e.quote) <= 1000
                 ],

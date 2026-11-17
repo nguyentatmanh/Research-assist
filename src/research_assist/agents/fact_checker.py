@@ -2,6 +2,11 @@ from collections import Counter
 
 from research_assist.agents.policies.verification import numbers, validate_checks  # noqa: F401
 from research_assist.agents.prompts.fact_checker import INSTRUCTION
+from research_assist.domain.comparison import (
+    direct_comparison_clause,
+    names_multiple_papers,
+    states_comparison,
+)
 from research_assist.domain.coordination import valid_requests
 from research_assist.domain.coverage import validate_coverage
 from research_assist.domain.models import (
@@ -50,7 +55,7 @@ class FactCheckerAgent:
             schema=FactCheckOutput,
             fallback=lambda: self._extractive_checks(claims, evidence),
         )
-        return self.validate_output(output, claims, evidence, requirements)
+        return self.validate_output(output, claims, evidence, requirements, question=question)
 
     def validate_output(
         self,
@@ -58,11 +63,26 @@ class FactCheckerAgent:
         claims: list[Claim],
         evidence: list[Evidence],
         requirements: list[Requirement],
+        *,
+        question: str = "",
     ) -> FactCheckOutput:
-        checks = validate_checks(claims, evidence, output.checks)
+        checks = validate_checks(
+            claims, evidence, output.checks, question=question, requirements=requirements
+        )
         coverage = validate_coverage(requirements, output.coverage, checks)
+        by_id = {c.id: c for c in claims}
+        if names_multiple_papers(question) and direct_comparison_clause(question):
+            comparison_ids = {r.id for r in requirements if direct_comparison_clause(r.text)}
+            for row in coverage:
+                if row.requirement_id not in comparison_ids or row.status != "covered":
+                    continue
+                if not any(states_comparison(by_id[cid].text) for cid in row.claim_ids):
+                    row.status = "partial"
+                    row.explanation = (
+                        "Đã có nhận định thành phần, nhưng chưa có kết luận đối chiếu "
+                        "được kiểm chứng."
+                    )
         if len(requirements) > 1:
-            by_id = {c.id: c for c in claims}
             for row in coverage:
                 if row.status in {"covered", "partial"} and any(
                     row.requirement_id not in by_id[cid].requirement_ids for cid in row.claim_ids
@@ -76,7 +96,6 @@ class FactCheckerAgent:
         claim_counts = Counter(c.id for c in claims)
         original_counts = Counter(c.claim_id for c in output.checks)
         approved = {c.claim_id for c in output.checks if c.verdict == "supported"}
-        by_id = {c.id: c for c in claims}
         requirement_ids = {r.id for r in requirements}
         for check in checks:
             if (

@@ -1,7 +1,16 @@
 """Plan once; retrieve/rerank per aspect; interleave so one topic cannot take all slots."""
 
+from collections.abc import Iterator
+
+from research_assist.domain.comparison import (
+    direct_comparison_clause,
+    measured_metrics,
+    metric_names,
+    names_multiple_papers,
+)
 from research_assist.domain.errors import ProviderError
 from research_assist.domain.models import (
+    Document,
     FollowUpRequest,
     QuestionAspect,
     QuestionPlan,
@@ -12,6 +21,90 @@ from research_assist.domain.models import (
 )
 from research_assist.domain.planning import PLAN_INSTRUCTION, local_plan, needs_planner
 from research_assist.domain.ports import LanguageModel, Reranker, SearchTool
+from research_assist.domain.text import (
+    bilingual_query_groups,
+    bm25_tokens,
+    extract_literal_anchors,
+    match_literal_anchors,
+)
+
+
+def _interleave(lanes: list[list[RetrievedChunk]]) -> Iterator[tuple[int, RetrievedChunk]]:
+    for rank in range(max((len(lane) for lane in lanes), default=0)):
+        for index, lane in enumerate(lanes):
+            if rank < len(lane):
+                yield index, lane[rank]
+
+
+def _reserve_anchors(
+    lanes: list[list[RetrievedChunk]],
+    anchors: list[set[str]],
+    matches: dict[str, set[str]],
+    limit: int,
+    seen: set[str],
+    focused_lanes: list[int],
+) -> list[tuple[int, RetrievedChunk]]:
+    """Preserve focused query coverage first, then reserve uncovered literals."""
+    reserved: list[tuple[int, RetrievedChunk]] = []
+    chosen = set(seen)
+    covered: set[str] = set()
+    if len(focused_lanes) > 1:
+        for index in focused_lanes:
+            best = max(
+                (chunk for chunk in lanes[index] if chunk.id not in chosen),
+                key=lambda chunk: len(matches.get(chunk.id, set()) & anchors[index]),
+                default=None,
+            )
+            if best is not None:
+                reserved.append((index, best))
+                chosen.add(best.id)
+                covered.update(matches.get(best.id, ()))
+                if len(reserved) >= limit:
+                    return reserved
+    if not matches:
+        return reserved
+    while len(reserved) < limit:
+        before = len(reserved)
+        for index, (lane, required) in enumerate(zip(lanes, anchors, strict=True)):
+            missing = required - covered
+            if not missing:
+                continue
+            best = max(
+                (chunk for chunk in lane if chunk.id not in chosen),
+                key=lambda chunk: len(matches.get(chunk.id, set()) & missing),
+                default=None,
+            )
+            if best is not None and matches.get(best.id, set()) & missing:
+                reserved.append((index, best))
+                chosen.add(best.id)
+                covered.update(matches[best.id])
+                if len(reserved) >= limit:
+                    break
+        if len(reserved) == before:
+            break
+    return reserved
+
+
+def _best_bilingual_candidate(
+    lanes: list[list[RetrievedChunk]], queries: list[str], seen: set[str]
+) -> tuple[int, RetrievedChunk] | None:
+    best = None
+    strength = (0.0, 0.0)
+    for index, (query, lane) in enumerate(zip(queries, lanes, strict=True)):
+        groups = bilingual_query_groups(query)
+        if not any(groups):
+            continue
+        for chunk in lane:
+            if chunk.id in seen:
+                continue
+            terms = set(bm25_tokens(chunk.text))
+            for group in groups:
+                count = len(group & terms)
+                if group and count >= min(2, len(group)):
+                    candidate = (count / len(group), chunk.lexical_score)
+                    if candidate > strength:
+                        best, strength = (index, chunk), candidate
+    return best
 
 
 class RetrievalAgent:
@@ -29,25 +122,50 @@ class RetrievalAgent:
         self.candidate_limit = candidate_limit
         self.reranker_fallback = reranker_fallback
 
-    async def prepare(self, request: ResearchRequest) -> QuestionPlan:
+    async def prepare(
+        self, request: ResearchRequest, *, sources: list[Document] | None = None
+    ) -> QuestionPlan:
         fallback = local_plan(request)
         if not needs_planner(request):
             return fallback
+        inventory = [
+            {"id": d.id, "title": d.title[:250], "filename": d.filename[:250]}
+            for d in sources or []
+            if d.id in request.document_ids
+        ]
         plan = await self.llm.generate(
             task="question_plan",
             instruction=PLAN_INSTRUCTION,
-            payload={"question": request.question, "requirements": request.requirements},
+            payload={
+                "question": request.question,
+                "requirements": request.requirements,
+                "sources": inventory,
+            },
             schema=QuestionPlan,
             fallback=lambda: fallback,
         )
         if request.requirements:
             # An LLM may translate queries, but cannot silently change user requirements.
-            queries = {a.text: a.query for a in plan.aspects}
+            aspects = {a.text: a for a in plan.aspects}
             plan = QuestionPlan(
                 aspects=[
-                    QuestionAspect(text=t, query=queries.get(t, t)) for t in request.requirements
+                    aspects.get(t) or QuestionAspect(text=t, query=t) for t in request.requirements
                 ]
             )
+        allowed = {d["id"] for d in inventory}
+        for aspect in plan.aspects:
+            ids = list(dict.fromkeys(aspect.document_ids))
+            aspect.document_ids = ids if set(ids) <= allowed else []
+        clause = direct_comparison_clause(request.question)
+        if clause and len(inventory) == 2 and names_multiple_papers(request.question):
+            comparison_aspects = [a for a in plan.aspects if direct_comparison_clause(a.text)]
+            if not comparison_aspects and not request.requirements:
+                aspect = QuestionAspect(text=clause[:500], query=clause[:1000])
+                plan.aspects = [*plan.aspects[:11], aspect]
+                comparison_aspects = [aspect]
+            for aspect in comparison_aspects:
+                aspect.document_ids = [d["id"] for d in inventory]
+                aspect.query = "\n".join(dict.fromkeys([aspect.query, clause]))[:1000]
         return plan
 
     async def run(
@@ -60,6 +178,7 @@ class RetrievalAgent:
         *,
         queries_override: list[str] | None = None,
         mode_override: str | None = None,
+        cover_documents: bool = False,
     ) -> tuple[RetrievalPlan, list[RetrievedChunk], list[str]]:
         question_plan = question_plan or await self.prepare(request)
         aspects = question_plan.aspects
@@ -67,16 +186,15 @@ class RetrievalAgent:
             a for i, a in enumerate(aspects, 1) if pending_ids is None or f"rq_{i}" in pending_ids
         ]
         # A retry uses missing aspects first, with original intent retained as a separate lane.
-        queries = list(
-            dict.fromkeys(
-                (queries_override if queries_override is not None else [a.query for a in focused])
-                + [request.question]
-            )
-        )[:13]
+        focused_queries = (
+            queries_override if queries_override is not None else [a.query for a in focused]
+        )
+        queries = list(dict.fromkeys([*focused_queries, request.question]))[:13]
         warnings: list[str] = []
         if len(queries) > self.candidate_limit:
             queries = [*queries[: self.candidate_limit - 1], request.question]
             warnings.append("Ngân sách candidate thấp hơn số ý; một số truy vấn chờ vòng bổ sung.")
+        focused_lanes = [index for index, query in enumerate(queries) if query in focused_queries]
         plan = RetrievalPlan(queries=queries, facets=[a.text for a in aspects])
         candidates: list[list[RetrievedChunk]] = []
         seen_chunk_ids = seen_chunk_ids or set()
@@ -101,16 +219,33 @@ class RetrievalAgent:
         # Share the expensive reranking budget across distinct chunks. Looking deeper in each
         # local search avoids losing slots when many aspect queries return the same first hits.
         lanes: list[list[RetrievedChunk]] = [[] for _ in queries]
+        lane_anchors = [extract_literal_anchors(query) for query in queries]
+        anchors: set[str] = set().union(*lane_anchors)
+        matches: dict[str, set[str]] = {}
+        if anchors:
+            unique = {chunk.id: chunk for lane in candidates for chunk in lane}
+            matches = {
+                chunk.id: match_literal_anchors(anchors, chunk.text) for chunk in unique.values()
+            }
+        bilingual = _best_bilingual_candidate(candidates, queries, seen_chunk_ids)
+        reserve_lanes = focused_lanes if bilingual or any(matches.values()) else []
         allocated: set[str] = set()
-        for rank in range(max((len(lane) for lane in candidates), default=0)):
-            for index, lane in enumerate(candidates):
-                if rank < len(lane) and lane[rank].id not in allocated:
-                    lanes[index].append(lane[rank])
-                    allocated.add(lane[rank].id)
-                    if len(allocated) >= self.candidate_limit:
-                        break
+        for index, chunk in _reserve_anchors(
+            candidates, lane_anchors, matches, self.candidate_limit, seen_chunk_ids, reserve_lanes
+        ):
+            lanes[index].append(chunk)
+            allocated.add(chunk.id)
+        if bilingual is not None and len(allocated) < self.candidate_limit:
+            index, chunk = bilingual
+            if chunk.id not in allocated:
+                lanes[index].append(chunk)
+                allocated.add(chunk.id)
+        for index, chunk in _interleave(candidates):
             if len(allocated) >= self.candidate_limit:
                 break
+            if chunk.id not in allocated:
+                lanes[index].append(chunk)
+                allocated.add(chunk.id)
         for index, (query, chunks) in enumerate(zip(queries, lanes, strict=True)):
             before = [c.id for c in chunks]
             rerank_failed = False
@@ -122,8 +257,14 @@ class RetrievalAgent:
                 if not self.reranker_fallback:
                     raise
                 warnings.append(f"Reranker không khả dụng; dùng thứ tự hybrid/BM25. {exc}")
-            if seen_chunk_ids:
-                chunks.sort(key=lambda c: c.id in seen_chunk_ids)
+            if seen_chunk_ids or lane_anchors[index]:
+                chunks = sorted(
+                    chunks,
+                    key=lambda c: (
+                        c.id in seen_chunk_ids,
+                        -len(lane_anchors[index] & matches.get(c.id, set())),
+                    ),
+                )
             plan.trace.append(
                 {
                     "query": query,
@@ -147,17 +288,48 @@ class RetrievalAgent:
                 }
             )
             lanes[index] = chunks
-        selected: list[RetrievedChunk] = []
-        seen: set[str] = set()
-        for rank in range(max((len(lane) for lane in lanes), default=0)):
-            for lane in lanes:
-                if rank < len(lane) and lane[rank].id not in seen:
-                    selected.append(lane[rank])
-                    seen.add(lane[rank].id)
-                    if len(selected) >= request.top_k:
-                        break
+        selected = [
+            chunk
+            for _, chunk in _reserve_anchors(
+                lanes, lane_anchors, matches, request.top_k, seen_chunk_ids, reserve_lanes
+            )
+        ]
+        seen = {chunk.id for chunk in selected}
+        if cover_documents:
+            requested_metrics = set().union(*(metric_names(query) for query in queries))
+            measured = {
+                chunk.id
+                for _, chunk in _interleave(lanes)
+                if requested_metrics and requested_metrics & measured_metrics(chunk.text)
+            }
+            # Reserve a reported-metric window on each side, when one was retrieved.
+            # This changes reading priority only. The Reader and Checker still verify it.
+            by_document: dict[str, RetrievedChunk] = {}
+            for _, chunk in _interleave(lanes):
+                current = by_document.get(chunk.document_id)
+                if current is None or (current.id not in measured and chunk.id in measured):
+                    by_document[chunk.document_id] = chunk
+            represented = {c.document_id for c in selected}
+            for chunk in by_document.values():
+                if len(selected) >= request.top_k:
+                    break
+                if chunk.document_id not in represented:
+                    selected.append(chunk)
+                    seen.add(chunk.id)
+                    represented.add(chunk.document_id)
+        reserved_count = len(selected)
+        for _, chunk in _interleave(lanes):
             if len(selected) >= request.top_k:
                 break
+            if chunk.id not in seen:
+                selected.append(chunk)
+                seen.add(chunk.id)
+        if bilingual is not None and reserved_count < request.top_k:
+            _, candidate = bilingual
+            if candidate.id not in seen:
+                translated = next((c for lane in lanes for c in lane if c.id == candidate.id), None)
+                if translated is not None:
+                    selected[request.top_k - 1 :] = [translated]
         if len(focused) > request.top_k:
             warnings.append("Số ý cần trả lời vượt top_k; tăng số đoạn hoặc dùng vòng bổ sung.")
         expand = getattr(self.search, "expand_context", None)

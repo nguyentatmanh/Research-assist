@@ -21,6 +21,14 @@ change; a paper's publication date is not the PDF file creation date or journal 
 examples from results, and authors' plans from completed experiments. Explain differing
 scopes when evidence appears to conflict; otherwise report ambiguity instead of resolving
 it using outside knowledge. Comparisons need evidence for each compared side.
+When the user explicitly asks if results can be directly compared, lead with a single
+comparison finding mapped to that requirement and cite each compared paper. Explain
+the concrete reason in the finding itself. Pair each paper's task with its own metric,
+using quotes for both. Metric or task mismatches can establish why a direct numerical
+comparison is invalid. Missing details alone leave comparability unresolved. If the
+quotes establish a common task, metric, dataset and protocol, compare the observed
+results only on that basis, with their conditions. Do not attribute this synthesis
+to the papers' authors.
 5. Use kind=source_finding for source-backed findings. Only when the question requests advice,
 use kind=grounded_recommendation for an explicitly conditional proposal based on cited
 premises. Never attribute an untested recommendation or guaranteed benefit to the source.

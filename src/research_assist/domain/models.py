@@ -123,6 +123,7 @@ class RetrievalPlan(Contract):
 class QuestionAspect(Contract):
     text: str = Field(min_length=1, max_length=500)
     query: str = Field(min_length=1, max_length=1000)
+    document_ids: list[str] = Field(default_factory=list, max_length=24)
 
 
 class QuestionPlan(Contract):
