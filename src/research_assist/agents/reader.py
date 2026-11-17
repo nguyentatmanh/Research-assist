@@ -1,7 +1,9 @@
+import json
 import re
 from hashlib import sha256
 
 from research_assist.agents.prompts.reader import INSTRUCTION
+from research_assist.domain.comparison import measured_metrics, metric_names
 from research_assist.domain.models import (
     Evidence,
     FollowUpRequest,
@@ -10,9 +12,104 @@ from research_assist.domain.models import (
     RetrievedChunk,
 )
 from research_assist.domain.ports import LanguageModel
-from research_assist.domain.provenance import intersect_regions
+from research_assist.domain.provenance import evidence_source_hash, intersect_regions
 from research_assist.domain.source_units import source_units
-from research_assist.domain.text import fold, tokens
+from research_assist.domain.text import bm25_tokens, extract_literal_anchors, fold, tokens
+
+_READ_TASK = "read_evidence"
+
+
+def _rank_source_units(
+    units: list[dict[str, str | int]],
+    query: str,
+    chunks: list[RetrievedChunk],
+    cover_documents: bool,
+) -> list[dict[str, str | int]]:
+    # Keep the narrower branch terms ahead of the original question. Treat
+    # English–German and English-to-German as sharing the same language names.
+    terms = set(bm25_tokens(re.sub(r"[-‐‑–_]", " ", query)))
+    anchors = extract_literal_anchors(query)
+    metrics = metric_names(query) if cover_documents else set()
+    by_id = {c.id: c for c in chunks}
+    ranked = []
+    seen = set()
+    for unit in units:
+        chunk = by_id[str(unit["chunk_id"])]
+        span = (
+            chunk.document_id,
+            chunk.page,
+            chunk.start + int(unit["start"]),
+            chunk.start + int(unit["end"]),
+        )
+        if span in seen:
+            continue
+        seen.add(span)
+        text = str(unit["text"])
+        overlap = len(terms.intersection(bm25_tokens(re.sub(r"[-‐‑–_]", " ", text))))
+        metric_matches = len(metrics & metric_names(text)) if metrics else 0
+        has_measurement = bool(metric_matches and metrics & measured_metrics(text))
+        ranked.append(
+            (
+                len(anchors & extract_literal_anchors(text)),
+                has_measurement,
+                metric_matches,
+                overlap,
+                unit,
+            )
+        )
+    ranked.sort(key=lambda item: item[:4], reverse=True)
+    ordered = [unit for _, _, _, _, unit in ranked]
+    if not cover_documents:
+        return ordered
+    by_document: dict[str, list[dict[str, str | int]]] = {}
+    for unit in ordered:
+        doc_id = by_id[str(unit["chunk_id"])].document_id
+        by_document.setdefault(doc_id, []).append(unit)
+    reserved = [lane[i] for i in range(2) for lane in by_document.values() if i < len(lane)]
+    reserved_ids = {unit["unit_id"] for unit in reserved}
+    return reserved + [unit for unit in ordered if unit["unit_id"] not in reserved_ids]
+
+
+def _missing_metric_windows(
+    units: list[dict[str, str | int]],
+    chunks: list[RetrievedChunk],
+    question: str,
+    selected: list[RawEvidence],
+) -> list[RawEvidence]:
+    requested = metric_names(question)
+    if not requested:
+        return []
+
+    def reports_metric(text: str) -> bool:
+        return bool(requested.intersection(measured_metrics(text)))
+
+    by_id = {c.id: c.document_id for c in chunks}
+    by_unit = {unit["unit_id"]: unit for unit in units}
+    represented: set[str] = set()
+    for item in selected:
+        if item.unit_id is None:
+            continue
+        unit = by_unit.get(item.unit_id)
+        if unit and unit["chunk_id"] == item.chunk_id and reports_metric(str(unit["text"])):
+            represented.add(by_id[item.chunk_id])
+    candidates = []
+    for unit in units:
+        chunk_id = str(unit["chunk_id"])
+        doc_id = by_id[chunk_id]
+        if doc_id in represented or not reports_metric(str(unit["text"])):
+            continue
+        candidates.append(
+            RawEvidence(
+                chunk_id=chunk_id,
+                unit_id=str(unit["unit_id"]),
+                quote="",
+                relevance="Đoạn có tên thước đo được hỏi và số liệu để kiểm chứng.",
+            )
+        )
+        represented.add(doc_id)
+        if len(candidates) + len(selected) >= 24:
+            break
+    return candidates
 
 
 def _asks_for_process(question: str) -> bool:
@@ -81,33 +178,91 @@ class ReaderAgent:
         chunks: list[RetrievedChunk],
         requirements: list[str] | None = None,
         requests: list[FollowUpRequest] | None = None,
+        *,
+        cover_documents: bool = False,
     ) -> tuple[list[Evidence], list[str], list[str]]:
         if not chunks:
             return [], ["Không tìm thấy đoạn tài liệu liên quan đến câu hỏi."], []
         units = source_units(chunks)
+        sources = [
+            {
+                "chunk_id": c.id,
+                "page": c.page,
+                "section": c.section,
+                "filename": c.filename,
+                "title": c.document_title,
+            }
+            for c in chunks
+        ]
+        base = {
+            "question": question,
+            "requirements": requirements or [],
+            "reading_requests": [r.model_dump() for r in (requests or [])],
+        }
+        if cover_documents:
+            base["evidence_goal"] = (
+                "Extract the task and metric reported by each source independently. "
+                "Return those quotes even if only one source is currently available. "
+                "Leave the question of comparability to the synthesis step."
+            )
+
+        def payload_for(windows: list[dict[str, str | int]]) -> dict[str, object]:
+            ids = {u["chunk_id"] for u in windows}
+            return {
+                **base,
+                "source_units": windows,
+                "sources": [source for source in sources if source["chunk_id"] in ids],
+            }
+
+        limit = getattr(self.llm, "input_limits", None)
+        limits = limit(_READ_TASK, INSTRUCTION, ReaderOutput) if limit else None
+        budget_warnings: list[str] = []
+        if limits:
+            max_chars, max_bytes = limits
+
+            def fits(windows: list[dict[str, str | int]]) -> bool:
+                serialized = json.dumps(payload_for(windows), ensure_ascii=False)
+                return len(serialized) <= max_chars and (
+                    max_bytes is None or len(serialized.encode()) <= max_bytes
+                )
+
+            if not fits(units):
+                queries = [r.need for r in requests or []] or requirements or [question]
+                ranked = _rank_source_units(units, " ".join(queries), chunks, cover_documents)
+                low, high = 0, len(ranked)
+                while low < high:
+                    middle = (low + high + 1) // 2
+                    if fits(ranked[:middle]):
+                        low = middle
+                    else:
+                        high = middle - 1
+                if not low:
+                    reason = "Ngân sách Reader không đủ để gửi một đoạn nguồn."
+                    return [], [reason], [reason]
+                budget_warnings.append(
+                    f"Reader: chọn {low}/{len(units)} đoạn nguồn để vừa ngân sách của tác vụ."
+                )
+                units = ranked[:low]
         raw = await self.llm.generate(
-            task="read_evidence",
-            instruction=(INSTRUCTION),
-            payload={
-                "question": question,
-                "requirements": requirements or [],
-                "reading_requests": [r.model_dump() for r in (requests or [])],
-                "source_units": units,
-                "sources": [
-                    {
-                        "chunk_id": c.id,
-                        "page": c.page,
-                        "section": c.section,
-                        "filename": c.filename,
-                        "title": c.document_title,
-                    }
-                    for c in chunks
-                ],
-            },
+            task=_READ_TASK,
+            instruction=INSTRUCTION,
+            payload=payload_for(units),
             schema=ReaderOutput,
             fallback=lambda: self._extract(question, chunks),
         )
-        return self.validate_output(question, chunks, raw, requirements)
+        if cover_documents and len(raw.evidence) < 24:
+            ranked = _rank_source_units(units, question, chunks, cover_documents)
+            supplemental = _missing_metric_windows(ranked, chunks, question, raw.evidence)
+            if supplemental:
+                raw = raw.model_copy(update={"evidence": [*raw.evidence, *supplemental]})
+        evidence, gaps, warnings = self.validate_output(
+            question,
+            chunks,
+            raw,
+            requirements,
+            windows=units,
+        )
+        return evidence, gaps, budget_warnings + warnings
 
     def validate_output(
         self,
@@ -115,8 +270,10 @@ class ReaderAgent:
         chunks: list[RetrievedChunk],
         raw: ReaderOutput,
         requirements: list[str] | None = None,
+        *,
+        windows: list[dict[str, str | int]] | None = None,
     ) -> tuple[list[Evidence], list[str], list[str]]:
-        units = source_units(chunks)
+        units = source_units(chunks) if windows is None else windows
         unit_lookup = {u["unit_id"]: u for u in units}
         selected = list(raw.evidence)
         supplemented = 0
@@ -168,7 +325,8 @@ class ReaderAgent:
                     )
                 )
                 supplemented += 1
-        lookup = {chunk.id: chunk for chunk in chunks}
+        sent_ids = {u["chunk_id"] for u in units}
+        lookup = {chunk.id: chunk for chunk in chunks if chunk.id in sent_ids}
         evidence, seen, rejected = [], set(), 0
         rejection_notes: list[str] = []
         for item in selected:
@@ -232,6 +390,8 @@ class ReaderAgent:
                 "các nhận định vẫn cần Fact Checker xác nhận."
             )
         warnings.extend(rejection_notes)
+        for item_evidence in evidence:
+            item_evidence.source_hash = evidence_source_hash(item_evidence)
         return evidence, raw.gaps, warnings
 
     def _extract(self, question: str, chunks: list[RetrievedChunk]) -> ReaderOutput:

@@ -4,7 +4,20 @@ import re
 from collections import Counter
 
 from research_assist.agents.policies.dates import date_mentions, without_dates
-from research_assist.domain.models import Claim, ClaimCheck, Evidence
+from research_assist.agents.policies.quantities import (
+    CountMention,
+    count_mentions,
+    unit_guard_reason,
+)
+from research_assist.domain.comparison import (
+    direct_comparison_clause,
+    metric_names,
+    names_multiple_papers,
+    ranks_distinct_metrics,
+    states_comparison,
+)
+from research_assist.domain.models import Claim, ClaimCheck, Evidence, Requirement
+from research_assist.domain.provenance import evidence_source_hash
 from research_assist.domain.text import fold
 
 _NUMBER = re.compile(r"(?<!\w)[+−-]?\d+(?:[.,]\d+)*(?:[eE][+-]?\d+)?(?:%|％)?")
@@ -39,8 +52,18 @@ def number_mentions(text: str) -> set[tuple[str, bool]]:
     }
 
 
+def _without_counts(text: str, counts: list[CountMention]) -> str:
+    for count in reversed(counts):
+        text = text[: count.start] + " " * (count.end - count.start) + text[count.end :]
+    return text
+
+
+def _count_key(count: CountMention) -> tuple[object, str, str, bool]:
+    return count.value, count.unit, count.relation, count.negated
+
+
 def numeric_guard_reason(claim: str, quotes: list[str]) -> str:
-    """Check explicit dates as whole values, then retain the literal numeric guards.
+    """Check explicit dates, equivalent labeled counts and remaining literal numbers.
 
     This never establishes semantic support or changes a model's rejection.
     Normalized month numbers cannot be borrowed to support unrelated measurements.
@@ -58,11 +81,28 @@ def numeric_guard_reason(claim: str, quotes: list[str]) -> str:
         if not {(d.value, d.negated) for d in dates}.issubset(source_dates):
             return "Ngày tháng hoặc dấu phủ định không khớp với các trích dẫn đã kiểm tra."
     remaining = without_dates(claim, dates)
-    if not numbers(remaining).issubset(numbers(" ".join(quotes))):
+    cited_counts = [count_mentions(quote) for quote in quotes]
+    count_keys = {_count_key(count) for counts in cited_counts for count in counts}
+    claim_counts = count_mentions(remaining)
+    matched = []
+    for count in claim_counts:
+        if _count_key(count) in count_keys:
+            matched.append(count)
+        elif count.requires_structured_match:
+            return "Số lượng, giới hạn hoặc dấu phủ định không khớp với các trích dẫn đã kiểm tra."
+    remaining = _without_counts(remaining, matched)
+    # Literal matching cannot reuse a coefficient or discard a count's qualifier.
+    literal_quotes = [
+        _without_counts(quote, [count for count in counts if count.requires_structured_match])
+        for quote, counts in zip(quotes, cited_counts, strict=True)
+    ]
+    if not numbers(remaining).issubset(numbers(" ".join(literal_quotes))):
         return "Có con số không xuất hiện trong các trích dẫn đã kiểm tra."
-    if not number_mentions(remaining).issubset(set().union(*(number_mentions(q) for q in quotes))):
+    if not number_mentions(remaining).issubset(
+        set().union(*(number_mentions(q) for q in literal_quotes))
+    ):
         return "Con số có dấu phủ định khác với bằng chứng; cần kiểm chứng lại."
-    return ""
+    return unit_guard_reason(remaining, literal_quotes)
 
 
 _SIGNIFICANCE = re.compile(
@@ -75,6 +115,60 @@ _NEGATIVE_SIGNIFICANCE_AFTER = re.compile(
     r"^\s*(?:(?:was|is|were|has|have|had|could|can|did|do|does|been|be|duoc|da)\s+){0,3}"
     r"(?:not|never|khong|chua)\b"
 )
+
+# Keep statistical relations intact. A bag of numbers cannot distinguish p > .05
+# from p < .05, nor an interval from two endpoints copied from unrelated quotes.
+_STAT_VALUE = r"[+−-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?"
+_P_STAT_VALUE = r"[+−-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)(?:[eE][+-]?\d+)?"
+_STAT_NEGATED = re.compile(fold(_NEGATED.pattern), re.I)
+_P_VALUE = re.compile(
+    rf"\bp(?:[ -]?values?)?\s*(?:(?:is|was|la)\s+)?"
+    rf"(?P<op><=|>=|!=|[=<>≤≥≠≈])\s*(?P<value>{_P_STAT_VALUE})(?!\w|[.,]\d)",
+    re.I,
+)
+_INTERVAL = re.compile(
+    rf"(?:(?P<level>\d+(?:\.\d+)?)\s*%\s*)?"
+    rf"\b(?:confidence\s+interval|ci|khoang\s+tin\s+cay)\b"
+    rf"\s*(?:(?:is|was|la)\s+)?[:=]?\s*[\[(]\s*"
+    rf"(?P<lower>{_STAT_VALUE})\s*[,;]\s*(?P<upper>{_STAT_VALUE})\s*[\])]",
+    re.I,
+)
+
+
+def statistical_guard_reason(claim: str, quotes: list[str]) -> str:
+    """Check explicit p relations and ordered confidence intervals, not significance.
+
+    Deliberately no default alpha, inferred calculations, or semantic promotion.
+    Entity, population, test selection and multiple-testing validity remain the
+    semantic judge's responsibility. Only familiar explicit notation is parsed.
+    """
+
+    def p_values(text: str) -> set[tuple[str, str, bool]]:
+        operators = {"<=": "≤", ">=": "≥", "!=": "≠"}
+        text = fold(text)
+        return {
+            (
+                operators.get(m["op"], m["op"]),
+                m["value"],
+                bool(_STAT_NEGATED.search(text[max(0, m.start() - 40) : m.start()])),
+            )
+            for m in _P_VALUE.finditer(text)
+        }
+
+    cited_p = set().union(*(p_values(q) for q in quotes))
+    if not p_values(claim).issubset(cited_p):
+        return "Quan hệ p-value không khớp với trích dẫn; không thể đổi dấu so sánh."
+
+    intervals = [m.groupdict() for quote in quotes for m in _INTERVAL.finditer(fold(quote))]
+    for mention in _INTERVAL.finditer(fold(claim)):
+        if not any(
+            mention["lower"] == row["lower"]
+            and mention["upper"] == row["upper"]
+            and (mention["level"] is None or mention["level"] == row["level"])
+            for row in intervals
+        ):
+            return "Mức tin cậy hoặc cặp cận khoảng tin cậy không khớp trong cùng trích dẫn."
+    return ""
 
 
 def significance_guard_reason(claim: str, quotes: list[str]) -> str:
@@ -94,8 +188,16 @@ def significance_guard_reason(claim: str, quotes: list[str]) -> str:
 
 
 def validate_checks(
-    claims: list[Claim], evidence: list[Evidence], checks: list[ClaimCheck]
+    claims: list[Claim],
+    evidence: list[Evidence],
+    checks: list[ClaimCheck],
+    *,
+    question: str = "",
+    requirements: list[Requirement] | None = None,
 ) -> list[ClaimCheck]:
+    comparison = direct_comparison_clause(question) if names_multiple_papers(question) else None
+    compared_metrics = metric_names(comparison) if comparison else set()
+    comparison_ids = {r.id for r in requirements or [] if direct_comparison_clause(r.text)}
     evidence_counts = Counter(e.id for e in evidence)
     lookup = {e.id: e for e in evidence if evidence_counts[e.id] == 1}
     claim_counts = Counter(c.id for c in claims)
@@ -113,11 +215,33 @@ def validate_checks(
             key not in lookup or key not in claim.evidence_ids for key in check.evidence_ids
         ):
             reason = "Kết quả kiểm tra không trỏ tới bằng chứng hợp lệ của nhận định."
+        elif any(
+            lookup[key].source_hash and lookup[key].source_hash != evidence_source_hash(lookup[key])
+            for key in check.evidence_ids
+        ):
+            reason = "Nội dung hoặc vị trí bằng chứng đã thay đổi so với mã băm nguồn đã đóng băng."
         elif check.verdict == "supported":
-            quoted = [lookup[key].quote for key in check.evidence_ids]
-            reason = numeric_guard_reason(claim.text, quoted) or significance_guard_reason(
-                claim.text, quoted
+            cited = [lookup[key] for key in check.evidence_ids]
+            quoted = [item.quote for item in cited]
+            reason = (
+                numeric_guard_reason(claim.text, quoted)
+                or statistical_guard_reason(claim.text, quoted)
+                or significance_guard_reason(claim.text, quoted)
             )
+            answers_comparison = direct_comparison_clause(claim.text) or (
+                comparison_ids.intersection(claim.requirement_ids) and states_comparison(claim.text)
+            )
+            if not reason and comparison and answers_comparison:
+                if len({item.document_id for item in cited}) < 2:
+                    reason = "Nhận định đối chiếu cần dẫn bằng chứng của cả hai bài."
+                elif 1 <= len(compared_metrics) <= 2 and not compared_metrics.issubset(
+                    set().union(*(metric_names(quote) for quote in quoted))
+                ):
+                    reason = "Đoạn trích chưa xác định đủ các thước đo được hỏi để đối chiếu."
+                elif ranks_distinct_metrics(claim.text, compared_metrics):
+                    reason = (
+                        "Nhận định xếp hạng trực tiếp các giá trị thuộc hai thước đo khác nhau."
+                    )
         if reason or check is None:
             validated.append(
                 ClaimCheck(

@@ -31,7 +31,7 @@ try {
     });
     ids.push((await response.json()).document.id);
   }
-  await page.goto(backend.base);
+  await page.goto(backend.base + "/desk");
   await page.waitForFunction(
     () => document.querySelector("#nav-doc-count").textContent === "2",
   );

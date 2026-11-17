@@ -23,9 +23,9 @@ def without_repo_imports(source):
 
 INTRO = """# Fine-tune Qwen3-Embedding-4B trên Kaggle — QLoRA, tối đa 12 giờ
 
-**Đây là notebook fine-tune Qwen bạn cần chạy.** GPU T4, Internet ON, Save Version
-→ Save & Run All. Dùng đúng model `Qwen/Qwen3-Embedding-4B`, không dùng Qwen chat.
-Một GPU được sử dụng; hai T4 không tạo thành một bộ nhớ chung.
+Chọn GPU T4, bật Internet, dùng Save Version → Save & Run All. Mặc định là
+`Qwen/Qwen3-Embedding-4B`. Đổi BASE_MODEL sang `Qwen/Qwen3-Embedding-0.6B`
+nếu muốn chạy thử với ít bộ nhớ hơn. Notebook sử dụng một GPU.
 
 Theo hướng dẫn Qwen: SWIFT, `task_type=embedding`, `model_type=qwen3_emb`, InfoNCE,
 dataset `messages` / `positive_messages` / `negative_messages`. Chuyển từ ví dụ
@@ -40,8 +40,8 @@ optimizer/RNG để tiếp tục trong phiên sau. Giới hạn này giảm rủ
 không thể bảo đảm chống việc nền tảng tắt đột ngột hoặc tải mạng quá chậm.
 
 Output chính là **adapter LoRA + base revision đã pin**, không merge 8GB weights
-trong phiên train. Notebook 05 đã hỗ trợ nạp adapter này để chạy GPU endpoint.
-Notebook 06 không mở tunnel hay chờ nhập key; Save & Run All sẽ kết thúc.
+trong phiên train. Có thể dùng notebook 03 để nạp adapter và mở API embedding.
+Phiên Save & Run All sẽ kết thúc sau khi đóng gói kết quả.
 
 Tài liệu dùng để triển khai:
 - https://github.com/QwenLM/Qwen3-Embedding/blob/main/docs/training/SWIFT.md
@@ -196,7 +196,7 @@ atomic_json(RUN / "session_report.json", {
 })
 print("Save Version Output contains the adapter ZIP, logs, data, metrics and resume checkpoint.")
 print("Next session: add this Output as Input; set RESUME_CHECKPOINT to its resume directory.")
-print("To serve: add adapter ZIP as Input, open notebook 05 and set ADAPTER_ZIP.")
+print("To serve: add adapter ZIP as Input, open notebook 03 and set ADAPTER_ZIP.")
 print("Use Qwen3 family in the app; changing checkpoint requires rebuilding document vectors.")
 """
 
@@ -262,7 +262,7 @@ if __name__ == "__main__":
             "accelerator": "GPU",
         },
     }
-    path = ROOT / "notebooks/06_kaggle_finetune_qwen3_4b.ipynb"
+    path = ROOT / "notebooks/01_train_embedding.ipynb"
     path.write_text(json.dumps(notebook, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(path)
 

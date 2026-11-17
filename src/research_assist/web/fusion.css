@@ -1,0 +1,368 @@
+/* Research Fusion additions on top of ducmanh-jr's original Research Desk. */
+[hidden] {
+  display: none !important;
+}
+.agent-toggle-group {
+  flex-wrap: wrap;
+}
+.btn-agent-mode:disabled,
+.preset-btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.btn-agent-mode.active {
+  color: #0f5132;
+  border-color: #0f5132;
+  background: #e7f2eb;
+}
+.target-row {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.target-row .detail-val {
+  overflow-wrap: anywhere;
+}
+.probe-status {
+  flex-basis: 100%;
+  color: var(--muted, #637168);
+}
+.settings-card {
+  min-width: 0;
+}
+#run-execution-summary {
+  overflow-wrap: anywhere;
+}
+#execution-feedback {
+  color: #0f5132;
+  margin: 8px 0 0;
+}
+#scout-results {
+  list-style: none;
+  padding: 0;
+}
+.scout-result {
+  padding: 16px 0;
+  border-bottom: 1px solid #e1e5df;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.scout-result a {
+  flex-basis: 100%;
+  font-weight: 600;
+  color: #0f5132;
+  overflow-wrap: anywhere;
+}
+.scout-result small {
+  flex: 1 1 200px;
+}
+.slash-command-popup {
+  z-index: 30;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.slash-command-item {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  font: inherit;
+}
+.slash-command-item strong {
+  min-width: 130px;
+}
+#methodology-content {
+  padding: 24px;
+}
+.audit-summary,
+.methodology-item {
+  padding: 16px;
+  border: 1px solid #dce4dd;
+  border-radius: 10px;
+  margin: 12px 0;
+}
+.audit-summary.failed {
+  border-color: #b46540;
+}
+.methodology-item h4 {
+  margin: 0 0 8px;
+}
+.methodology-item blockquote {
+  margin: 10px 0;
+  border-left: 3px solid #8cae99;
+  padding-left: 12px;
+  font-size: 13px;
+}
+.report-run-meta {
+  color: #54675c;
+  font-size: 12px;
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 800px) {
+  .agent-mode-row,
+  .settings-card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .agent-toggle-group {
+    justify-content: flex-start;
+  }
+  .settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-card {
+    padding: 18px;
+  }
+  .tab-row {
+    flex-wrap: wrap;
+  }
+  .quick-prompts-container {
+    flex-wrap: wrap;
+  }
+  .agent-quick-presets {
+    flex-wrap: wrap;
+  }
+  .slash-command-item {
+    flex-wrap: wrap;
+  }
+}
+@media print {
+  .sidebar,
+  .topbar,
+  .main-footer,
+  .research-layout,
+  .research-steps,
+  .page-heading,
+  .report-actions,
+  .tab-row,
+  .evidence-panel,
+  #toast-region,
+  dialog {
+    display: none !important;
+  }
+  #view-research {
+    display: block !important;
+  }
+  .view:not(#view-research),
+  #empty-state,
+  .report-preview {
+    display: none !important;
+  }
+  #results-section,
+  #report-content {
+    display: block !important;
+  }
+  #checks-content,
+  #methodology-content {
+    display: none !important;
+  }
+  .content-shell,
+  .app-shell,
+  main,
+  .result-layout {
+    display: block !important;
+    margin: 0 !important;
+    width: 100% !important;
+    padding: 0 !important;
+  }
+  .report-card,
+  .report-content {
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+  body {
+    background: white;
+    color: black;
+  }
+}
+.target-editor {
+  border-top: 1px solid #e1e5df;
+  padding: 16px 0;
+}
+.target-editor summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #0f5132;
+}
+/* Remote embedding panel retained from Research-assist (MIT). */
+
+.gpu-settings {
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-card);
+  padding: 22px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow-sm);
+}
+.gpu-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.gpu-heading > div {
+  flex: 1;
+  min-width: 180px;
+}
+.gpu-heading h3 {
+  margin: 0;
+  font-size: 17px;
+  color: var(--color-primary);
+}
+.gpu-heading p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 5px 0 0;
+}
+.gpu-badge {
+  font-size: 10px;
+  padding: 6px 9px;
+  border-radius: 20px;
+  background: var(--color-muted);
+  color: var(--color-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.gpu-badge[data-active="true"] {
+  background: #eff6ff;
+  color: var(--color-primary);
+  border: 1px solid #bfdbfe;
+}
+.gpu-settings fieldset {
+  border: 0;
+  padding: 0;
+  margin: 20px 0 0;
+  min-width: 0;
+}
+.gpu-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+.gpu-wide {
+  grid-column: 1 / -1;
+}
+.gpu-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.gpu-field input {
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: white;
+  color: var(--ink);
+  font: 12px/1.6 var(--mono);
+}
+.gpu-field input:focus {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+.gpu-field small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.7;
+}
+.gpu-optional {
+  font-weight: 400;
+  color: var(--muted);
+}
+.gpu-advanced {
+  margin: 18px 0;
+}
+.gpu-advanced summary {
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--color-primary);
+}
+.gpu-advanced .gpu-form-grid {
+  margin-top: 14px;
+}
+.gpu-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 20px;
+}
+.gpu-settings button {
+  font-size: 12px;
+}
+.gpu-feedback {
+  font-size: 12px;
+  line-height: 1.8;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--color-muted);
+  color: var(--color-muted-foreground);
+  overflow-wrap: anywhere;
+}
+.gpu-feedback[data-kind="success"] {
+  background: #eff6ff;
+  color: var(--color-primary);
+  border: 1px solid #bfdbfe;
+}
+.gpu-feedback[data-kind="error"] {
+  background: #fef2f2;
+  color: var(--color-destructive);
+  border: 1px solid #fecaca;
+}
+.gpu-index-panel {
+  border-top: 1px solid var(--color-border);
+  padding-top: 12px;
+}
+.gpu-index-panel p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--color-muted-foreground);
+}
+.gpu-privacy {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.8;
+  margin: 16px 0 0;
+}
+@media (max-width: 600px) {
+  .gpu-settings {
+    padding: 15px;
+  }
+  .gpu-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .gpu-wide {
+    grid-column: auto;
+  }
+  .gpu-actions > button {
+    width: 100%;
+    justify-content: center;
+  }
+  .gpu-heading h3 {
+    font-size: 16px;
+  }
+}
+
+/* Match the retained embedding panel to the Duc Manh palette. */
+.gpu-settings {
+  --color-border: var(--line);
+  --color-card: #fff;
+  --color-primary: var(--accent);
+  --color-muted: var(--soft);
+  --color-muted-foreground: var(--muted);
+  --color-ring: var(--accent);
+  --color-destructive: #a32424;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 5%);
+}
+.brand-mark img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  display: block;
+}

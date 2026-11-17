@@ -18,7 +18,7 @@ try {
   });
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(backend.base);
+  await page.goto(backend.base + "/desk");
   await page.waitForFunction(() =>
     document
       .querySelector("#connection-label")

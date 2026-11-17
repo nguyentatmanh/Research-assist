@@ -1,0 +1,37 @@
+.target-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  padding-top: 16px;
+}
+.target-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+.target-form input,
+.target-form select {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #d4ded5;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+}
+.target-form .input-helper,
+.target-actions,
+.target-save-status {
+  grid-column: 1/-1;
+}
+.target-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 600px) {
+  .target-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

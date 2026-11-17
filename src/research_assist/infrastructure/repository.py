@@ -260,7 +260,8 @@ class Repository:
                     "id": data["id"],
                     "status": data["status"],
                     "created_at": data["created_at"],
-                    "question": data["request"]["question"],
+                    "question": data["request"].get("display_question")
+                    or data["request"]["question"],
                     "title": data["result"]["title"] if data.get("result") else None,
                     "stop_reason": (data.get("result") or {}).get("stop_reason"),
                     "coverage_complete": (

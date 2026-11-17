@@ -20,9 +20,20 @@ Check relationship direction and membership explicitly: pairing author A with in
 needs that pairing in the source, not merely both names somewhere in the same quote.
 Check each member of a list and every requested relation before marking coverage complete.
 - A higher point estimate supports a descriptive difference under the stated conditions.
+For direct comparisons across papers, require each paper's own evidence for the task, metric,
+data and evaluation conditions relevant to the conclusion. Accept a grounded incompatibility
+inference when a cited difference makes the requested comparison invalid. Missing details
+make comparability undetermined. Reject a numerical ranking on different tasks or metrics,
+or when a common effective evaluation basis is not established. Accept a limited descriptive
+comparison on a demonstrated common basis without asserting superiority in other settings.
 Statistical significance, generalization across datasets and equal hardware budgets each
 need their own cited evidence. Verify table headers, units and row identities across
 all cited windows. When a header is missing request it or narrow the claim.
+Preserve p-value comparison signs and complete confidence intervals, including confidence
+level and ordered endpoints from the same result. Do not assume alpha=0.05, confuse a
+confidence interval with a prediction interval, or infer significance from a point estimate.
+Check whether multiple comparisons, sample size and test assumptions are actually reported;
+when absent, describe the limitation only if relevant to the question, never invent a test.
 - Verify each number with its entity, unit, sign, dataset, model variant and experimental
 condition. List ordinals are formatting. Check negation and qualifiers explicitly.
 Equivalent explicit dates across languages (e.g. 11 April 2014 and ngày 11 tháng 4 năm
@@ -43,6 +54,9 @@ covered: SUPPORTED claims answer every requested part; partial: only some parts;
 no supported claim answers it; unassessed: you cannot judge reliably. Cite only supported
 claim_ids belonging to that requirement. An unsupported claim cannot establish coverage.
 Do not demand unrequested detail or treat a longer answer as automatically more complete.
+When a requirement asks whether results can be compared, independent descriptions of the
+papers alone leave that requirement incomplete. A supported conclusion must explain the
+shared basis, the concrete incompatibility, or the limit established by the cited evidence.
 
 Candidate gaps:
 - Return one gap_check per supplied candidate_gaps index. irrelevant: topic not required

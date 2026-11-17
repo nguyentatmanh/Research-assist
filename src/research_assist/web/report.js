@@ -1,6 +1,19 @@
-import { $, $$, el, icon, locator, statuses, toast } from "./dom.js";
+import { api } from "./api.js";
+import { $, $$, el, locator, statuses, toast } from "./dom.js";
 import { renderUsage } from "./lab.js";
 import { runPresentation } from "./run_status.js";
+import {
+  appendScoutGapActions,
+  focusScoutInput,
+} from "./scout.js?v=research-exports-1";
+import {
+  appendReportCitations,
+  citationIndex,
+  presentReport,
+  renderReportTable,
+  reportBlocks,
+  unescapeReport,
+} from "./report_content.js?v=research-exports-1";
 
 const agentLabels = {
   supervisor: "Supervisor (phiên cũ)",
@@ -14,49 +27,15 @@ const agentLabels = {
 let currentResult = null;
 let citations = new Map();
 
-function unescapeMarkdown(text) {
-  return text.replace(/\\([\\`*_{}\[\]<>()#!|])/g, "$1");
-}
-
-function citationIndex(result) {
-  const map = new Map();
-  const rows = result.markdown.split("\n");
-  for (let index = 0; index < rows.length; index++) {
-    const match = rows[index].match(/^\[(\d+)\].*`(ch_[a-z0-9]+)`$/);
-    if (!match) continue;
-    const quoteLine = rows
-      .slice(index + 1, index + 5)
-      .find((line) => line.startsWith("> "));
-    const quote = quoteLine ? unescapeMarkdown(quoteLine.slice(2)) : null;
-    const evidence = result.evidence.find(
-      (e) =>
-        e.chunk_id === match[2] &&
-        (!quote || e.quote.replace(/\n/g, " ") === quote),
-    );
-    if (evidence) map.set(Number(match[1]), evidence);
-  }
-  return map;
-}
-
-function appendCitations(parent, value) {
-  const expression = /(?<!\\)\[(\d+)\]/g;
-  let start = 0;
-  for (const match of value.matchAll(expression)) {
-    parent.append(
-      document.createTextNode(
-        unescapeMarkdown(value.slice(start, match.index)),
-      ),
-    );
-    const evidence = citations.get(Number(match[1]));
-    if (evidence) {
-      const button = el("button", "citation-button", match[0]);
-      button.title = `${evidence.filename} · ${locator(evidence)}`;
-      button.addEventListener("click", () => showEvidence(evidence));
-      parent.append(button);
-    } else parent.append(document.createTextNode(match[0]));
-    start = match.index + match[0].length;
-  }
-  parent.append(document.createTextNode(unescapeMarkdown(value.slice(start))));
+function reportCitation(marker) {
+  const evidence = citations.get(marker);
+  if (!evidence) return null;
+  const button = el("button", "citation-button", marker);
+  button.type = "button";
+  button.title = `${evidence.filename} · ${locator(evidence)}`;
+  button.setAttribute("aria-label", `Xem trích dẫn ${marker} trong tài liệu`);
+  button.addEventListener("click", () => showEvidence(evidence));
+  return button;
 }
 
 // This is a deliberately small, text-only renderer for the writer's known Markdown format.
@@ -65,62 +44,52 @@ export function renderMarkdown(markdown) {
   const root = $("#report-content");
   root.replaceChildren();
   let list = null;
-  let target = root;
-  for (const line of markdown.split("\n")) {
-    if (
-      [
-        "## Sources",
-        "## Nguồn trích dẫn",
-        "## Question coverage",
-        "## Mức đáp ứng câu hỏi",
-      ].includes(line)
-    ) {
-      const details = el("details", "report-appendix");
-      details.append(el("summary", "", line.slice(3)));
-      root.append(details);
-      target = details;
+  let tableHeading;
+  for (const line of reportBlocks(presentReport(markdown))) {
+    if (typeof line !== "string") {
       list = null;
+      root.append(renderReportTable(line, reportCitation, tableHeading));
       continue;
     }
-    if (line.startsWith("## ")) target = root;
     if (!line.trim()) {
       list = null;
       continue;
     }
-    if (line.startsWith("# "))
-      target.append(el("h1", "", unescapeMarkdown(line.slice(2))));
-    else if (line.startsWith("## "))
-      target.append(el("h2", "", unescapeMarkdown(line.slice(3))));
-    else if (line.startsWith("- ")) {
+    if (line.startsWith("# ")) {
+      const heading = unescapeReport(line.slice(2));
+      if (heading !== $("#result-title")?.textContent)
+        root.append(el("h1", "", heading));
+    } else if (line.startsWith("## ")) {
+      tableHeading = unescapeReport(line.slice(3));
+      root.append(el("h2", "", tableHeading));
+    } else if (line.startsWith("- ")) {
       if (!list) {
         list = el("ul");
-        target.append(list);
+        root.append(list);
       }
       const item = el("li");
-      appendCitations(item, line.slice(2));
+      appendReportCitations(item, line.slice(2), reportCitation);
       list.append(item);
     } else if (line.startsWith("> "))
-      target.append(el("blockquote", "", unescapeMarkdown(line.slice(2))));
+      root.append(el("blockquote", "", unescapeReport(line.slice(2))));
     else if (/^\[\d+\]/.test(line)) {
-      target.append(
-        el(
-          "p",
-          "report-source-label",
-          unescapeMarkdown(line.replace(/`/g, "")),
-        ),
+      root.append(
+        el("p", "report-source-label", unescapeReport(line.replace(/`/g, ""))),
       );
     } else if (
       line.startsWith("*") &&
       line.endsWith("*") &&
       !line.startsWith("**")
     ) {
-      target.append(
-        el("p", "report-note", unescapeMarkdown(line.slice(1, -1))),
-      );
+      root.append(el("p", "report-note", unescapeReport(line.slice(1, -1))));
     } else {
       const paragraph = el("p");
-      appendCitations(paragraph, line.replace(/\*\*/g, ""));
-      target.append(paragraph);
+      appendReportCitations(
+        paragraph,
+        line.replace(/\*\*/g, ""),
+        reportCitation,
+      );
+      root.append(paragraph);
     }
   }
 }
@@ -131,9 +100,12 @@ export function selectTab(name) {
     tab.classList.toggle("active", active);
     tab.setAttribute("aria-selected", String(active));
   });
-  ["report", "checks"].forEach((tab) => {
-    $(`#${tab}-content`).hidden = tab !== name;
+  ["report", "checks", "methodology"].forEach((tab) => {
+    const panel = $(`#${tab}-content`);
+    if (panel) panel.hidden = tab !== name;
   });
+  $("#coverage-panel").hidden =
+    name !== "checks" || !currentResult?.coverage?.length;
 }
 
 export function renderEvents(events, status, result = null) {
@@ -261,12 +233,13 @@ export function renderEvents(events, status, result = null) {
   }
 }
 
-export function renderResult(result) {
+export function renderResult(result, displayQuestion) {
   currentResult = result;
   citations = citationIndex(result);
   $("#results-section").hidden = false;
   $("#empty-state").hidden = true;
-  $("#result-title").textContent = result.title;
+  $("#result-title").textContent =
+    displayQuestion || result.question || result.title;
   $("#export-md").href = `/api/runs/${result.run_id}/export?format=md`;
   $("#export-json").href = `/api/runs/${result.run_id}/export?format=json`;
   const supported = result.checks.filter(
@@ -299,9 +272,19 @@ export function renderResult(result) {
   );
   $("#checks-count").textContent = String(result.checks.length);
   renderMarkdown(result.markdown);
+  appendScoutGapActions(
+    $("#report-content"),
+    result,
+    "secondary-button",
+    (query) => {
+      $('[data-view="library"]').click();
+      focusScoutInput($("#scout-query"), query);
+    },
+  );
   renderChecks(result);
   renderCoverage(result);
   renderEvidence(result.evidence);
+  renderMethodology(result);
   renderEvents(result.events, "completed", result);
   selectTab("report");
   window.dispatchEvent(new Event("research-result-rendered"));
@@ -399,6 +382,7 @@ $("#evidence-search")?.addEventListener("input", filterEvidence);
 
 export function showEvidence(evidence) {
   if (!currentResult) return;
+  const runId = currentResult.run_id;
   const dialog = $("#source-dialog");
   $("#source-title").textContent = evidence.filename;
   const root = $("#source-dialog-content");
@@ -414,42 +398,70 @@ export function showEvidence(evidence) {
     el("p", "source-relevance", evidence.relevance),
   );
   const actions = el("div", "source-actions");
-  const link = el("a", "secondary-button", "Mở tài liệu gốc");
-  link.href = `/api/documents/${evidence.document_id}/file${evidence.page !== null ? `#page=${evidence.page}` : ""}`;
-  link.target = "_blank";
-  link.rel = "noopener";
-  link.append(icon("external"));
-  actions.append(link);
-  root.append(actions);
-  if (evidence.page && evidence.regions?.length) {
-    const previews = el("div", "source-previews");
-    const boxes = new Map(
-      evidence.regions.map((r) => [r.bbox.join(","), r.bbox]),
-    );
-    for (const clip of boxes.values()) {
+  const read = el("button", "secondary-button", "Mở tài liệu gốc");
+  read.type = "button";
+  actions.append(read);
+  const original = el("div", "source-previews");
+  original.setAttribute("aria-live", "polite");
+  root.append(actions, original);
+  read.addEventListener("click", async () => {
+    read.disabled = true;
+    const doc = encodeURIComponent(evidence.document_id);
+    const query = new URLSearchParams({
+      run_id: runId,
+      evidence_id: evidence.id,
+    });
+    if (evidence.page) {
       const preview = el("img", "source-page-preview");
-      preview.alt = `Vùng bằng chứng trên trang ${evidence.page} của ${evidence.filename}`;
-      preview.loading = "lazy";
-      preview.src = `/api/documents/${encodeURIComponent(evidence.document_id)}/pages/${evidence.page}/region?clip=${encodeURIComponent(clip.join(","))}`;
-      preview.addEventListener("error", () => preview.remove());
-      previews.append(preview);
+      preview.alt = `Trang ${evidence.page} · ${evidence.filename}`;
+      preview.addEventListener("error", () => {
+        original.textContent = "Không tải được trang nguồn của phiên này.";
+        read.disabled = false;
+      });
+      preview.src = `/api/documents/${doc}/pages/${evidence.page}/preview?${query}`;
+      original.replaceChildren(preview);
+      return;
     }
-    root.append(el("h3", "", "Vùng nguồn trên tài liệu gốc"), previews);
-  }
+    original.textContent = "Đang mở tài liệu…";
+    try {
+      const source = await api(`/documents/${doc}/text?${query}`);
+      const content = el("div", "source-context");
+      const points = Array.from(source.text);
+      const start = source.highlight_start;
+      const end = source.highlight_end;
+      if (
+        Number.isInteger(start) &&
+        Number.isInteger(end) &&
+        start >= 0 &&
+        end <= points.length &&
+        start < end
+      ) {
+        content.append(
+          points.slice(0, start).join(""),
+          el("mark", "", points.slice(start, end).join("")),
+          points.slice(end).join(""),
+        );
+      } else content.textContent = source.text;
+      original.replaceChildren(content);
+    } catch (error) {
+      original.textContent = error.message;
+      read.disabled = false;
+    }
+  });
   root.append(el("h3", "", "Ngữ cảnh đoạn truy xuất"));
   const chunk = currentResult.retrieved.find(
     (item) => item.id === evidence.chunk_id,
   );
   if (chunk) {
     const context = el("div", "source-context");
-    const start = chunk.text.indexOf(evidence.quote);
-    if (start >= 0) {
+    const points = Array.from(chunk.text);
+    const start = evidence.start - chunk.start;
+    const end = evidence.end - chunk.start;
+    if (start >= 0 && points.slice(start, end).join("") === evidence.quote) {
       context.append(
-        document.createTextNode(chunk.text.slice(0, start)),
+        document.createTextNode(points.slice(0, start).join("")),
         el("mark", "", evidence.quote),
-        document.createTextNode(
-          chunk.text.slice(start + evidence.quote.length),
-        ),
+        document.createTextNode(points.slice(end).join("")),
       );
     } else context.textContent = chunk.text;
     root.append(context);
@@ -481,7 +493,7 @@ function renderCoverage(result) {
     el(
       "summary",
       "",
-      `Độ đầy đủ: ${covered}/${result.coverage.length} ý được model đánh giá đã đáp ứng`,
+      `Đối soát từng ý · ${covered}/${result.coverage.length} ý được đánh giá là đủ`,
     ),
   );
   panel.append(detail);
@@ -521,5 +533,97 @@ function renderCoverage(result) {
     );
     item.append(content);
     detail.append(item);
+  }
+}
+
+let methodologyVersion = 0;
+async function renderMethodology(result) {
+  const version = ++methodologyVersion,
+    root = $("#methodology-content");
+  if (!root) return;
+  root.replaceChildren();
+  const audit = result.citation_audit || {},
+    card = el("article", `audit-summary ${audit.status || ""}`);
+  const labels = {
+    passed: "Đạt kiểm tra trích dẫn",
+    failed: "Có nhận định bị loại",
+    not_applicable: "Chưa áp dụng",
+  };
+  card.append(
+    el("h3", "", labels[audit.status] || "Chưa có kiểm toán"),
+    el(
+      "p",
+      "",
+      `${audit.accepted_claim_ids?.length || 0} nhận định được giữ · ${audit.rejected_claim_ids?.length || 0} nhận định bị loại.`,
+    ),
+  );
+  for (const reason of audit.reasons || []) card.append(el("p", "", reason));
+  card.append(
+    el(
+      "small",
+      "",
+      "Kiểm toán vị trí/quote xác nhận nguồn trích dẫn, không bảo đảm mọi suy luận đều đúng.",
+    ),
+  );
+  root.append(
+    card,
+    el(
+      "p",
+      "report-run-meta",
+      `Điều phối: ${result.orchestration_mode} · Dừng: ${result.stop_reason}`,
+    ),
+  );
+  const choices = Object.entries(result.agent_targets || {}).map(
+    ([role, target]) => `${agentLabels[role]}: ${target}`,
+  );
+  if (choices.length)
+    root.append(
+      el("p", "report-run-meta", `Cấu hình đã chốt: ${choices.join(" · ")}`),
+    );
+  const loading = el("p", "", "Đang đọc checklist phương pháp…");
+  root.append(loading);
+  try {
+    const data = await api(`/runs/${result.run_id}/methodology`);
+    if (version !== methodologyVersion) return;
+    loading.textContent = data.warning;
+    const names = {
+      seeds: "Seed / trạng thái ngẫu nhiên",
+      uncertainty: "Độ bất định",
+      test: "Kiểm định thống kê",
+      sample_size: "Cỡ mẫu",
+      hardware: "Phần cứng",
+      limitations: "Hạn chế",
+    };
+    for (const item of data.items) {
+      const section = el("article", "methodology-item");
+      section.append(
+        el("h4", "", names[item.criterion] || item.criterion),
+        el(
+          "p",
+          "",
+          item.matches.length
+            ? `${item.matches.length} bằng chứng có từ khóa liên quan.`
+            : "Chưa thấy trong bằng chứng đã đọc.",
+        ),
+      );
+      for (const match of item.matches) {
+        const quote = el("blockquote", "", match.quote);
+        const button = el(
+          "button",
+          "text-button",
+          `Mở ${match.evidence_id}${match.page ? " · Trang " + match.page : ""}`,
+        );
+        button.addEventListener("click", () => {
+          const source = result.evidence.find(
+            (e) => e.id === match.evidence_id,
+          );
+          if (source) showEvidence(source);
+        });
+        section.append(quote, button);
+      }
+      root.append(section);
+    }
+  } catch (error) {
+    if (version === methodologyVersion) loading.textContent = error.message;
   }
 }

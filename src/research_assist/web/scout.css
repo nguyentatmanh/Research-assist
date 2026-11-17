@@ -1,0 +1,45 @@
+.scout-abstract {
+  flex: 0 0 100%;
+  min-width: 0;
+  font-size: 0.875em;
+  overflow-wrap: anywhere;
+}
+
+.scout-abstract summary {
+  cursor: pointer;
+  padding-block: 0.3rem;
+}
+
+.scout-abstract p {
+  margin: 0.35rem 0 0.65rem;
+  line-height: 1.5;
+}
+
+.scout-paper-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.scout-gap-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.scout-gap-option {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.scout-gap-option p {
+  margin: 0 0 0.3rem;
+}
+
+@media print {
+  .scout-gap-actions {
+    display: none;
+  }
+}

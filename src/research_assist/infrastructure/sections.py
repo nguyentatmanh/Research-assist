@@ -1,6 +1,7 @@
 """Conservative heading boundaries with a page/window fallback; never guesses printed pages."""
 
 import re
+from ipaddress import IPv4Address
 
 from research_assist.domain.models import SourceSection
 
@@ -13,6 +14,15 @@ def _table_row(line: str) -> bool:
     return bool(re.match(r"^\d{1,2}\s+", line)) and len(NUMBER.findall(line)) >= 3
 
 
+def _address_line(line: str) -> bool:
+    """An IP address followed by prose is data, not a numbered section heading."""
+    try:
+        IPv4Address(line.split(maxsplit=1)[0])
+    except (ValueError, IndexError):
+        return False
+    return True
+
+
 def split_headings(sections: list[SourceSection]) -> list[SourceSection]:
     result = []
     active = ""
@@ -21,7 +31,12 @@ def split_headings(sections: list[SourceSection]) -> list[SourceSection]:
         offset = 0
         for line in source.text.splitlines(keepends=True):
             clean = line.strip()
-            if HEADING.match(clean) and not clean.endswith((".", ";")) and not _table_row(clean):
+            if (
+                HEADING.match(clean)
+                and not clean.endswith((".", ";"))
+                and not _table_row(clean)
+                and not _address_line(clean)
+            ):
                 boundaries.append((offset, clean.lstrip("# ")))
             offset += len(line)
         starts = [0, *[offset for offset, _ in boundaries if offset > 0]]

@@ -66,9 +66,11 @@ try {
     assert.equal(stored.status(), 201);
     await route.fulfill({ status: 201, json: await stored.json() });
   });
-  await page.goto(backend.base);
+  await page.goto(backend.base + "/desk");
   await page.locator('[data-view="library"]').click();
-  await page.locator(".paper-discovery summary").click();
+  await page
+    .locator(".paper-discovery:has(#paper-search-form) summary")
+    .click();
   const search = page.locator("#paper-search-form button");
   await page.locator("#paper-query").fill("attention evidence");
   await search.click();
@@ -84,7 +86,10 @@ try {
     paper.url,
   );
   assert.equal(await page.locator("#nav-doc-count").textContent(), "0");
-  const add = page.locator("#paper-results button");
+  const results = page.locator("#paper-results");
+  const add = results.getByRole("button", { name: /^Thêm vào kho/ });
+  const bibtex = results.getByRole("button", { name: /^Tải BibTeX/ });
+  assert.equal(await bibtex.count(), 1);
   await add.click();
   await page.waitForFunction(
     () =>
@@ -140,6 +145,26 @@ try {
     );
     assert.equal(await search.isVisible(), true);
   }
+  // DOI discovery is a metadata lookup; it does not import unreviewed publisher URLs.
+  paper.source = "crossref";
+  paper.doi = "10.1234/research.1";
+  paper.import_available = false;
+  paper.url = "javascript:window.injected=true";
+  await page.locator("#paper-source").selectOption("crossref");
+  assert.equal(await page.locator("#paper-results li").count(), 0);
+  await search.click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector("#paper-status").textContent === "Tìm được 1 bài.",
+  );
+  assert.equal(await add.count(), 0);
+  assert.equal(await bibtex.count(), 1);
+  assert.equal(
+    await page.locator("#paper-results a").getAttribute("href"),
+    "https://doi.org/" + encodeURIComponent(paper.doi),
+  );
+  assert.equal(await page.locator("#nav-doc-count").textContent(), "1");
+  assert.equal(imports, 2);
   if (process.env.UI_SCREENSHOT)
     await page.screenshot({ path: process.env.UI_SCREENSHOT, fullPage: true });
   assert.deepEqual(errors, []);

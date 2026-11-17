@@ -3,6 +3,12 @@
 INSTRUCTION = """Read the supplied source_units and select evidence for the research
 question. Return at most 24 items; quality and coverage matter more than filling the limit.
 
+For a cross-paper comparison, collect the premises from each paper independently:
+what task the paper evaluates, what data or setting it uses, and what metric it reports.
+Select the units establishing those facts even if neither paper discusses the other
+or states whether their results are directly comparable. Do not make the comparison
+yourself. A missing premise is a gap; the absence of a comparison sentence is not.
+
 Selection:
 - Check every requirement. Prefer units directly answering it, then units stating relevant
 conditions, caveats or conflicting findings. A shared keyword or section heading is not
@@ -13,6 +19,8 @@ method from the proposed algorithm. Do not infer a complete list from a truncate
 to identify each column, entity, unit and experimental setting. Never guess the alignment
 of flattened cells. Select neighboring supplied units when they complete the context.
 - Keep negations, qualifications, exceptions and comparisons with the statement they limit.
+  For a measured result, retain the task, dataset, language pair and metric that identify
+  the value. When a sentence starts or ends mid-result, select its adjacent context too.
 Do not omit contrary evidence simply because another quote supports a convenient answer.
 Do not treat examples, hypotheses or future work as measured results.
 

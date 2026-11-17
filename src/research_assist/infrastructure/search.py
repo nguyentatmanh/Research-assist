@@ -14,7 +14,14 @@ from research_assist.config import Settings
 from research_assist.domain.errors import ProviderError
 from research_assist.domain.models import IndexedChunk, RetrievedChunk
 from research_assist.domain.ports import Embedder
-from research_assist.domain.text import tokens
+from research_assist.domain.provenance import intersect_regions
+from research_assist.domain.text import (
+    bilingual_query_groups,
+    bm25_tokens,
+    extract_literal_anchors,
+    match_literal_anchors,
+    tokens,
+)
 from research_assist.infrastructure.embeddings import embedding_identity, validate_vectors
 from research_assist.infrastructure.local_runtime import INFERENCE_LOCK
 from research_assist.infrastructure.repository import Repository
@@ -32,25 +39,55 @@ class BM25Index:
         self.lengths: list[int] = []
         self.postings: dict[str, list[tuple[int, int]]] = defaultdict(list)
         for i, text in enumerate(corpus):
-            counts = Counter(tokens(text))
+            counts = Counter(bm25_tokens(text))
             self.lengths.append(sum(counts.values()))
             for term, tf in counts.items():
                 self.postings[term].append((i, tf))
         self.average = max(sum(self.lengths) / max(self.count, 1), 1)
 
     def score(self, query: str) -> list[float]:
+        scores, _ = self.score_with_bilingual_candidate(query)
+        return scores
+
+    def score_with_bilingual_candidate(self, query: str) -> tuple[list[float], int | None]:
+        original = set(bm25_tokens(query))
+        scores, source_idf = self._score_terms(original)
+        translations = bilingual_query_groups(query)
+        expansion: set[str] = set().union(*translations)
+        if not expansion:
+            return scores, None
+        extra, expansion_idf = self._score_terms(expansion)
+        # Terms absent from this corpus cannot set the cap. A purely Vietnamese
+        # question still needs to retrieve English passages from translation hits.
+        limit = source_idf or expansion_idf
+        ranked = [
+            score + min(limit, 0.35 * bonus) for score, bonus in zip(scores, extra, strict=True)
+        ]
+        best: int | None = None
+        strength = (-1.0, -1.0)
+        for group in translations:
+            counts = Counter(index for term in group for index, _ in self.postings.get(term, []))
+            for index, count in sorted(counts.items()):
+                candidate = (count / len(group), extra[index])
+                if count >= min(2, len(group)) and candidate > strength:
+                    best, strength = index, candidate
+        return ranked, best
+
+    def _score_terms(self, terms: set[str]) -> tuple[list[float], float]:
         scores = [0.0] * self.count
-        for term in set(tokens(query)):
+        lowest_idf = math.inf
+        for term in sorted(terms):
             postings = self.postings.get(term, [])
             df = len(postings)
             if not df:
                 continue
             idf = math.log(1 + (self.count - df + 0.5) / (df + 0.5))
+            lowest_idf = min(lowest_idf, idf)
             for index, tf in postings:
                 scores[index] += (
                     idf * tf * 2.5 / (tf + 1.5 * (0.25 + 0.75 * self.lengths[index] / self.average))
                 )
-        return scores
+        return scores, lowest_idf if math.isfinite(lowest_idf) else 0.0
 
 
 def chunk_view(chunk: IndexedChunk, **scores: Any) -> RetrievedChunk:
@@ -247,20 +284,32 @@ class HybridSearch:
                 if neighbor.section != chunk.section:
                     continue
                 left, right = max(start, neighbor.start), min(end, neighbor.end)
-                if left > right or max(end, neighbor.end) - min(start, neighbor.start) > 2600:
+                if left > right:
                     continue
                 if (
                     text[left - start : right - start]
                     != neighbor.text[left - neighbor.start : right - neighbor.start]
                 ):
                     continue
-                if neighbor.start < start:
-                    text = neighbor.text[: start - neighbor.start] + text
-                    start = neighbor.start
-                if neighbor.end > end:
-                    text += neighbor.text[end - neighbor.start :]
-                    end = neighbor.end
-                regions.extend(r for r in neighbor.regions if r not in regions)
+                next_start, next_end = min(start, neighbor.start), max(end, neighbor.end)
+                if next_end - next_start > 2600:
+                    # A token window may start in the middle of a measured result.
+                    # Restore its leading context without expanding the entire neighbor.
+                    if neighbor.start >= start or len(text) >= 2600:
+                        continue
+                    next_start = max(neighbor.start, start - 500, end - 2600)
+                    next_end = end
+                text = (
+                    neighbor.text[next_start - neighbor.start : start - neighbor.start] + text
+                    if next_start < start
+                    else text
+                )
+                if next_end > end:
+                    text += neighbor.text[end - neighbor.start : next_end - neighbor.start]
+                start, end = next_start, next_end
+                for region in intersect_regions(neighbor.regions, start, end):
+                    if region not in regions:
+                        regions.append(region)
                 break
             expanded.append(
                 chunk.model_copy(
@@ -336,17 +385,38 @@ class HybridSearch:
         fused: dict[str, float] = defaultdict(float)
         lexical: dict[str, float] = defaultdict(float)
         semantic: dict[str, float] = {}
+        anchor_priority: dict[str, float] = {}
+        chunk_anchors: dict[str, set[str]] = defaultdict(set)
+        bilingual_candidates: set[str] = set()
         cap = max(40, top_k * 4)
         for qindex, query in enumerate(queries):
-            scores = snapshot.lexical.score(query)
+            scores, bilingual = snapshot.lexical.score_with_bilingual_candidate(query)
+            anchors = extract_literal_anchors(query)
+            possible = {
+                index
+                for anchor in anchors
+                for index, _ in snapshot.lexical.postings.get(anchor.removesuffix("%"), [])
+            }
+            matches = {
+                index: match_literal_anchors(anchors, chunks[index].text) for index in possible
+            }
             positive = sorted(
                 (i for i, score in enumerate(scores) if score > 0),
-                key=lambda i: (-scores[i], chunks[i].id),
+                key=lambda i: (-len(matches.get(i, ())), -scores[i], chunks[i].id),
             )[:cap]
+            if bilingual is not None:
+                bilingual_candidates.add(chunks[bilingual].id)
+                if bilingual not in positive:
+                    positive.append(bilingual)
             for rank, index in enumerate(positive, 1):
                 key = chunks[index].id
                 fused[key] += 1 / (60 + rank)
                 lexical[key] = max(lexical[key], scores[index])
+                if found := matches.get(index):
+                    chunk_anchors[key].update(found)
+                    anchor_priority[key] = max(
+                        anchor_priority.get(key, 0.0), len(found) / len(anchors)
+                    )
             if query_vectors:
                 if len(query_vectors[qindex]) != snapshot.matrix.shape[1]:
                     raise ProviderError(
@@ -369,11 +439,20 @@ class HybridSearch:
                     semantic[key] = max(semantic.get(key, -1), float(cosines[index]))
         lookup = {c.id: c for c in chunks}
         selected: list[RetrievedChunk] = []
-        for key in sorted(fused, key=lambda k: (-fused[k], k)):
+        ranked = sorted(fused, key=lambda k: (-anchor_priority.get(k, 0.0), -fused[k], k))
+        # A capped translation bonus alone cannot compete when many passages
+        # use the query language. Reserve at most one strong translated hit.
+        translated = next((key for key in ranked if key in bilingual_candidates), None)
+        if translated is not None and len(anchor_priority) < top_k <= ranked.index(translated):
+            ranked.remove(translated)
+            ranked.insert(top_k - 1, translated)
+        for key in ranked:
             chunk, terms = lookup[key], snapshot.terms[key]
+            found = chunk_anchors.get(key, set())
             if any(
                 p.document_id == chunk.document_id
                 and p.page == chunk.page
+                and found.issubset(chunk_anchors.get(p.id, set()))
                 and len(terms & snapshot.terms[p.id]) / max(1, len(terms | snapshot.terms[p.id]))
                 > 0.92
                 for p in selected
@@ -411,6 +490,7 @@ class FrozenSearch(HybridSearch):
 
         self.document_ids = frozenset(document_ids)
         self.snapshot = snapshot
+        self._subset_snapshots: dict[frozenset[str], SearchSnapshot] = {}
         self.frozen_chunks = {c.id: c.model_copy(deep=True) for c in snapshot.chunks}
         self.source_versions = {
             doc: hashlib.sha256(
@@ -427,9 +507,33 @@ class FrozenSearch(HybridSearch):
         }
 
     async def _snapshot(self, scope: list[str], use_dense: bool) -> SearchSnapshot:
-        if frozenset(scope) != self.document_ids:
+        requested = frozenset(scope)
+        if requested == self.document_ids:
+            return self.snapshot
+        if not requested or not requested <= self.document_ids:
             raise ProviderError("Source scope differs from the frozen run snapshot.")
-        return self.snapshot
+        async with self._lock:
+            subset = self._subset_snapshots.get(requested)
+            if subset is None:
+                subset = await asyncio.to_thread(self._select_snapshot, requested)
+                self._subset_snapshots[requested] = subset
+            return subset
+
+    def _select_snapshot(self, requested: frozenset[str]) -> SearchSnapshot:
+        source = self.snapshot
+        chunks = [c for c in source.chunks if c.document_id in requested]
+        rows = [i for i, c in enumerate(source.dense_chunks) if c.document_id in requested]
+        matrix = source.matrix[rows]
+        matrix.setflags(write=False)
+        return SearchSnapshot(
+            source.revision,
+            chunks,
+            BM25Index([c.text for c in chunks]),
+            [source.dense_chunks[i] for i in rows],
+            matrix,
+            {c.id: source.terms[c.id] for c in chunks},
+            matrix.nbytes,
+        )
 
 
 class LocalReranker:

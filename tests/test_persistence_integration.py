@@ -92,8 +92,17 @@ async def test_second_round_can_use_new_evidence_when_first_pool_is_full(evidenc
         )
         for i in range(24)
     ]
+    quote = "New source evidence answers the missing question."
     fresh = evidence.model_copy(
-        update={"id": "ev_new", "quote": "New source evidence answers the missing question."}
+        update={
+            "id": "ev_new",
+            "chunk_id": "ch_fixture",
+            "quote": quote,
+            "page": 1,
+            "section": "fixture",
+            "start": 0,
+            "end": len(quote),
+        }
     )
 
     class Retrieval:
@@ -170,3 +179,19 @@ async def test_second_round_can_use_new_evidence_when_first_pool_is_full(evidenc
     )
     assert result.rounds == 2 and result.evidence[0].id == "ev_new"
     assert fresh.quote in result.markdown and len(result.evidence) == 24
+    assert result.citation_evidence_ids == [fresh.id]
+
+    # Even a checker approval cannot publish a quote with the wrong origin.
+    fresh.page = 9
+    second = await pipeline.run(
+        "run_invalid_span",
+        ResearchRequest(
+            question="Explain the missing research evidence", orchestration_mode="fixed"
+        ),
+        lambda event: None,
+    )
+    assert second.citation_audit.rejected_claim_ids == ["cl_current"]
+    assert second.citation_audit.status == "failed"
+    assert second.report_status == "abstained"
+    assert second.citation_evidence_ids == []
+    assert fresh.quote not in second.markdown

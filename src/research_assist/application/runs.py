@@ -33,6 +33,9 @@ class RunManager:
         return bool(self.tasks)
 
     def submit(self, request: ResearchRequest) -> RunRecord:
+        for target in request.agent_targets.values():
+            if target not in {"default", "demo"} and target not in self.settings.execution_targets:
+                raise ResearchError(f"Execution target '{target}' chưa được cấu hình trên server.")
         # No await between capacity check and task registration: atomic on this loop.
         if len(self.tasks) >= self.settings.max_pending_runs:
             raise CapacityError("Hàng đợi đang đầy. Hãy chờ một phiên nghiên cứu hoàn thành.")
@@ -80,7 +83,9 @@ class RunManager:
                 run.status, run.updated_at = "running", now()
                 self.repository.save_run(run)
                 async with asyncio.timeout(self.settings.run_timeout_seconds):
-                    run.result = await self.pipeline.run(run.id, run.request, emit, checkpoint)
+                    run.result = await self.pipeline.run(
+                        run.id, run.request, emit, checkpoint, scope_documents=run.scope_documents
+                    )
                 run.status = "completed"
         except asyncio.CancelledError:
             run.status = "cancelled"

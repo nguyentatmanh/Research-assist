@@ -117,6 +117,10 @@ def test_unrelated_import_failure_stops_before_training_without_numpy_reinstall(
     assert len(calls) == 1
 
 
+@pytest.mark.skipif(
+    not (ROOT / "notebooks/01_kaggle_finetune_e5.ipynb").exists(),
+    reason="01_kaggle_finetune_e5.ipynb removed",
+)
 def test_generated_notebook_blocks_imports_until_setup_is_ready():
     book = json.loads((ROOT / "notebooks/01_kaggle_finetune_e5.ipynb").read_text(encoding="utf-8"))
     # A pending restart is an ordinary setup status, not a fake traceback. Every

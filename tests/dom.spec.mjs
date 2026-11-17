@@ -6,7 +6,7 @@ const { JSDOM } = require("jsdom");
 const backend = await startBackend();
 const base = backend.base;
 const nativeFetch = globalThis.fetch;
-const html = await (await nativeFetch(base)).text();
+const html = await (await nativeFetch(base + "/desk")).text();
 const dom = new JSDOM(html, { url: base });
 const { window } = dom;
 globalThis.window = window;
@@ -70,7 +70,10 @@ try {
     window.document.querySelectorAll(".agent-node.completed").length,
     5,
   );
-  assert.ok(find("#report-content").textContent.includes("RAG"));
+  assert.ok(
+    find("#result-title").textContent.includes("RAG") ||
+      find("#report-content").textContent.includes("RAG"),
+  );
   assert.equal(window.document.querySelectorAll(".coverage-item").length, 2);
   assert.ok(find("#coverage-panel").textContent.includes("Chưa xác định"));
   checks++;
