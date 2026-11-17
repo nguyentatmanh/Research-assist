@@ -1,16 +1,14 @@
 def patch_environment():
-    """Patches missing triton.ops, removes invalid BNB_CUDA_VERSION overrides, and handles CPU/GPU fallbacks for Kaggle and Colab runtimes."""
+    """Patches missing triton.ops, language attributes, and handles CPU/GPU fallbacks for Kaggle and Colab."""
     import os
     import sys
     import types
     import importlib.machinery
 
-    # 1. Clean BNB_CUDA_VERSION if it causes missing libcudart.so
     if "BNB_CUDA_VERSION" in os.environ:
         del os.environ["BNB_CUDA_VERSION"]
-    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    # 2. Patch Triton ops mock for Triton 3+ compatibility
+    # 1. Patch Triton mock safely
     m_triton = sys.modules.get("triton")
     if m_triton is None:
         try:
@@ -21,6 +19,19 @@ def patch_environment():
             m_triton.__spec__ = importlib.machinery.ModuleSpec("triton", None)
             m_triton.__path__ = []
             sys.modules["triton"] = m_triton
+
+    # Ensure triton.language exists to satisfy transformers.modeling_utils import checks
+    if not hasattr(m_triton, "language"):
+        m_lang = types.ModuleType("triton.language")
+        m_lang.__spec__ = importlib.machinery.ModuleSpec("triton.language", None)
+        m_lang.constexpr = lambda x: x
+        setattr(m_triton, "language", m_lang)
+        sys.modules["triton.language"] = m_lang
+
+    if not hasattr(m_triton, "cdiv"):
+        setattr(m_triton, "cdiv", lambda a, b: (a + b - 1) // b)
+    if not hasattr(m_triton, "jit"):
+        setattr(m_triton, "jit", lambda *a, **k: (lambda f: f))
 
     m_ops = types.ModuleType("triton.ops")
     m_ops.__spec__ = importlib.machinery.ModuleSpec("triton.ops", None)
@@ -34,7 +45,7 @@ def patch_environment():
     sys.modules["triton.ops"] = m_ops
     sys.modules["triton.ops.matmul_perf_model"] = m_perf
 
-    # 3. Bulletproof fallback for bitsandbytes if native CUDA libs fail or not present
+    # 2. Bulletproof fallback for bitsandbytes
     try:
         import bitsandbytes as bnb
     except Exception:
@@ -56,39 +67,6 @@ def patch_environment():
         sys.modules["bitsandbytes"] = m_bnb
         sys.modules["bitsandbytes.nn"] = m_bnb_nn
         sys.modules["bitsandbytes.nn.modules"] = m_bnb_nn.modules
-
-    # 4. Patch importlib.metadata.version fallback for bitsandbytes
-    try:
-        import importlib.metadata
-        _orig_meta_version = importlib.metadata.version
-        def _safe_meta_version(distribution_name):
-            try:
-                return _orig_meta_version(distribution_name)
-            except Exception:
-                if distribution_name == "bitsandbytes":
-                    return "0.47.0"
-                raise
-        importlib.metadata.version = _safe_meta_version
-    except Exception:
-        pass
-
-    # 5. Patch missing MODEL_FOR_VISION_2_SEQ_MAPPING_NAMES in transformers for TRL DPO compatibility
-    try:
-        import transformers.models.auto.modeling_auto as mma
-        if not hasattr(mma, "MODEL_FOR_VISION_2_SEQ_MAPPING_NAMES"):
-            mma.MODEL_FOR_VISION_2_SEQ_MAPPING_NAMES = {}
-    except Exception:
-        pass
-
-    # 6. Mock optional llm_blender for TRL PairwiseJudge compatibility
-    if "llm_blender" not in sys.modules:
-        try:
-            import llm_blender
-        except Exception:
-            m_blender = types.ModuleType("llm_blender")
-            m_blender.__spec__ = importlib.machinery.ModuleSpec("llm_blender", None)
-            m_blender.Blender = type("Blender", (), {})
-            sys.modules["llm_blender"] = m_blender
 
 patch_environment()
 
