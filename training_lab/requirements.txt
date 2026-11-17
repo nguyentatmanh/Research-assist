@@ -1,0 +1,7 @@
+# Install separately from the FastAPI server environment.
+transformers>=4.57,<5
+peft>=0.17,<1
+datasets>=3,<5
+accelerate>=1,<2
+torch>=2.5
+# For --qlora also install a CUDA-compatible bitsandbytes build.
