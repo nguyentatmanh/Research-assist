@@ -1,0 +1,51 @@
+{
+  "timestamp": "2026-11-08 23:40:14",
+  "benchmark_dataset": "Multi-Domain Universal Research Corpus",
+  "evaluated_queries": 100,
+  "stages": [
+    {
+      "stage_id": "A1",
+      "name": "BM25 Sparse (FTS5)",
+      "description": "Chỉ sử dụng SQLite FTS5 BM25 từ khóa thuần túy",
+      "recall_10": 0.682,
+      "ndcg_10": 0.614,
+      "mrr_10": 0.645,
+      "latency_ms": 150,
+      "delta_ndcg": "+0.0%",
+      "delta_recall": "+0.0%"
+    },
+    {
+      "stage_id": "A2",
+      "name": "Hybrid (BM25 + Base BGE-M3 + RRF)",
+      "description": "Kết hợp Sparse + Dense Vector với Reciprocal Rank Fusion",
+      "recall_10": 0.765,
+      "ndcg_10": 0.681,
+      "mrr_10": 0.702,
+      "latency_ms": 420,
+      "delta_ndcg": "+10.9%",
+      "delta_recall": "+12.2%"
+    },
+    {
+      "stage_id": "A3",
+      "name": "Hybrid + Pretrained BGE-Reranker",
+      "description": "Thêm Cross-Encoder gốc chọn Top 5 từ Top 50 candidates",
+      "recall_10": 0.765,
+      "ndcg_10": 0.718,
+      "mrr_10": 0.739,
+      "latency_ms": 850,
+      "delta_ndcg": "+5.4%",
+      "delta_recall": "+0.0%"
+    },
+    {
+      "stage_id": "A4",
+      "name": "Hybrid + Fine-Tuned LoRA Reranker",
+      "description": "Reranker LoRA r=16 học trên Hard Negatives từ tài liệu chuyên ngành",
+      "recall_10": 0.765,
+      "ndcg_10": 0.759,
+      "mrr_10": 0.781,
+      "latency_ms": 860,
+      "delta_ndcg": "+5.7%",
+      "delta_recall": "+0.0%"
+    }
+  ]
+}

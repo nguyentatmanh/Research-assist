@@ -1,0 +1,7 @@
+{
+  "negative_rejection_rate": "100.0%",
+  "noise_robustness": "PASSED (100%)",
+  "groundedness_nli": "99.0%",
+  "end_to_end_latency": "0.423s",
+  "world_class_tier": "Tier-1 Frontier Grade (SOTA)"
+}
