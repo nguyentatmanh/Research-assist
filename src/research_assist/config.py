@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     ollama_base_url: str = "http://localhost:11434/v1"
     deepseek_api_key: SecretStr = SecretStr("")
+    openalex_api_key: SecretStr = SecretStr("")
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_thinking: bool = False
     structured_output: Literal["schema", "json"] = "schema"

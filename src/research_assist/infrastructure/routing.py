@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Literal
 
 import httpx
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from research_assist.config import AgentRole, AgentRoute, Settings, TargetName
 from research_assist.domain.errors import ProviderUnavailable, ResearchError
@@ -190,6 +190,14 @@ class ModelRouter:
         if profile == "balanced" and role in {"retrieval", "writer"}:
             return "local"
         return "demo" if self.models[role].name == "demo" else "api"
+
+    def input_limits(
+        self, task: str, instruction: str, schema: type[BaseModel]
+    ) -> tuple[int, int | None] | None:
+        model, _ = self.selected_route(TASK_ROLES[task])
+        if isinstance(model, HTTPLanguageModel):
+            return model.input_limits(task, instruction, schema)
+        return None
 
     async def generate(
         self,

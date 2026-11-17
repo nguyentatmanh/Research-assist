@@ -10,7 +10,7 @@ from xml.etree import ElementTree
 import httpx
 from pydantic import BaseModel
 
-from research_assist.domain.errors import CapacityError, DocumentError, ProviderError
+from research_assist.domain.errors import CapacityError, DocumentError, NotFoundError, ProviderError
 
 PAPER_ID = re.compile(r"(?:\d{4}\.\d{4,5}|[a-z][a-z.-]*/\d{7})v[1-9]\d{0,3}", re.ASCII)
 ATOM = "{http://www.w3.org/2005/Atom}"
@@ -22,9 +22,10 @@ class Paper(BaseModel):
     authors: list[str]
     published: str
     url: str
-    source: Literal["arxiv", "crossref"] = "arxiv"
+    source: Literal["arxiv", "crossref", "openalex"] = "arxiv"
     doi: str | None = None
     import_available: bool = True
+    abstract: str | None = None
 
 
 async def _download(
@@ -34,21 +35,29 @@ async def _download(
     params: dict[str, str] | None = None,
     *,
     provider: str = "arXiv",
+    headers: dict[str, str] | None = None,
+    timeout_seconds: float = 45,
+    allow_not_found: bool = False,
 ) -> bytes:
     try:
         async with (
-            asyncio.timeout(45),
+            asyncio.timeout(timeout_seconds),
             client.stream(
                 "GET",
                 url,
                 params=params,
-                timeout=20,
+                timeout=min(20, timeout_seconds),
                 follow_redirects=False,
-                headers={"User-Agent": "ResearchDesk/1.0 (academic paper discovery)"},
+                headers={
+                    "User-Agent": "ResearchDesk/1.0 (academic paper discovery)",
+                    **(headers or {}),
+                },
             ) as response,
         ):
             if response.status_code == 429:
                 raise CapacityError(f"{provider} đang giới hạn lượt truy cập. Hãy thử lại sau.")
+            if allow_not_found and response.status_code == 404:
+                raise NotFoundError(f"Không tìm thấy bài báo trên {provider}.")
             response.raise_for_status()
             data = bytearray()
             async for part in response.aiter_bytes(65536):
@@ -68,6 +77,13 @@ class ArxivLibrary:
         self.next_search = 0.0
         self.searching = asyncio.Lock()
         self.recent: dict[str, Paper] = {}
+
+    def remember(self, papers: list[Paper]) -> None:
+        for paper in papers:
+            self.recent.pop(paper.paper_id, None)
+            self.recent[paper.paper_id] = paper
+        while len(self.recent) > 100:
+            del self.recent[next(iter(self.recent))]
 
     async def search(self, query: str) -> list[Paper]:
         query = " ".join(query.split())
@@ -119,11 +135,7 @@ class ArxivLibrary:
                         url=f"https://arxiv.org/abs/{paper_id}",
                     )
                 )
-            for paper in papers[:5]:
-                self.recent.pop(paper.paper_id, None)
-                self.recent[paper.paper_id] = paper
-            while len(self.recent) > 100:
-                del self.recent[next(iter(self.recent))]
+            self.remember(papers[:5])
             return papers[:5]
         except (UnicodeError, ElementTree.ParseError, ValueError) as exc:
             raise ProviderError("arXiv trả về danh sách bài báo không hợp lệ.") from exc
